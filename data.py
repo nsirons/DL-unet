@@ -75,7 +75,7 @@ class ImageDataset(Dataset):
             target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
             image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
             self.image.extend(cv2.imread(os.path.join(image_folder, image_name), -1) for image_name in image_names)
-            self.target.extend(cv2.normalize(cv2.imread(os.path.join(target_folder, filename), -1), dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX) for filename in os.listdir(target_folder))
+            self.target.extend(cv2.normalize(cv2.imread(os.path.join(target_folder, filename), -1), dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX) / 65535 for filename in os.listdir(target_folder))
 
     def __len__(self):
         return len(self.image)
@@ -98,8 +98,18 @@ class ImageDataset(Dataset):
 # cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    download_all_data()  # run this to get data
+    # run this to download data
+    download_all_data()
+
     cur_dir = os.path.abspath('')
     root_dir = os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training")
     transformed_dataset = ImageDataset(root_dir)
+
+    # Testing
+    img, mask = transformed_dataset[0]
+    total = np.hstack((img.numpy().reshape((512, 512)), mask.numpy().reshape(512,512)))
+    cv2.imshow("hello", total)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
     dataloader = DataLoader(transformed_dataset, batch_size=4, shuffle=True, num_workers=4)
