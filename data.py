@@ -75,7 +75,10 @@ class ImageDataset(Dataset):
             target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
             image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
             self.image.extend(cv2.imread(os.path.join(image_folder, image_name), -1) for image_name in image_names)
-            self.target.extend(cv2.normalize(cv2.imread(os.path.join(target_folder, filename), -1), dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX) / 65535 for filename in os.listdir(target_folder))
+            for filename in os.listdir(target_folder):
+                img = cv2.imread(os.path.join(target_folder, filename), -1)
+                img[img > 0] = 1.
+                self.target.append(img)
 
     def __len__(self):
         return len(self.image)
@@ -98,6 +101,21 @@ class ImageDataset(Dataset):
 # cv2.destroyAllWindows()
 
 if __name__ == '__main__':
+    import cv2
+
+    import numpy as np
+    cur_dir = os.path.abspath('')
+    print(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg067.tif"))
+    img = cv2.imread(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg005.tif"), -1)
+    # img_scaled = cv2.normalize(img, dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX)
+    img[img > 0] = 65535
+    img_scaled = img
+    print(np.max(img_scaled), np.min(img_scaled))
+    cv2.imshow("hello", img_scaled)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    exit()
     # run this to download data
     download_all_data()
 
