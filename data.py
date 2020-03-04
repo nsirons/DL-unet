@@ -3,7 +3,7 @@ import wget
 import zipfile
 import cv2
 
-
+from PIL import Image
 import numpy as np
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.ndimage.filters import gaussian_filter
@@ -26,6 +26,50 @@ def download_data_pkg(cur_dir, dataset_name,  dataset_type):
         print(f"Done - {folder_name}")
 
 
+def download_isbi(cur_dir, dataset_type):
+    if dataset_type == "training":
+        t = "train"
+        folders = ("volume", "labels")
+    else:
+        t = "test"
+        folders = ("volume",)
+
+    folder_name = f"ISBI2012-{dataset_type}"
+
+    if folder_name not in os.listdir(os.path.join(cur_dir, "data")):
+        os.mkdir(os.path.join(cur_dir, "data", folder_name))
+
+        for folder in folders:
+            print(f"Downloading - {folder_name}_{t}")
+            url = f"http://brainiac2.mit.edu/isbi_challenge/sites/default/files/{t}-{folder}.tif"
+            wget.download(url, os.path.join(cur_dir, "data", folder_name))
+            print(f"Done - {folder_name}")
+            if folder == 'volume':
+                name = '01'
+            else:
+                name = '01_GT'
+
+            if name not in os.listdir(os.path.join(cur_dir, "data", folder_name)):
+                os.mkdir(os.path.join(cur_dir, "data", folder_name, name))
+                if folder == 'labels':
+                    os.mkdir(os.path.join(cur_dir, "data", folder_name, name, "SEG"))
+
+                img = Image.open(os.path.join(cur_dir, "data", folder_name, f"{t}-{folder}.tif"))
+
+                i = 0
+                while True:
+                    try:
+                        img.seek(i)
+                        if folder == 'volume':
+                            img.save(os.path.join(cur_dir, "data", folder_name, name, f't{i:03d}.tif'))
+                        else:
+                            img.save(os.path.join(cur_dir, "data", folder_name, name, 'SEG', f'man_seg{i:03d}.tif'))
+                        i += 1
+                    except EOFError:
+                        # Not enough frames in img
+                        break
+    
+    
 def download_all_data():
     cur_dir = os.path.abspath('')
     if "data" not in os.listdir(cur_dir):
@@ -35,6 +79,9 @@ def download_all_data():
     download_data_pkg(cur_dir, dataset_name='DIC-C2DH-HeLa', dataset_type='challenge')
     download_data_pkg(cur_dir, dataset_name='PhC-C2DH-U373', dataset_type='training')
     download_data_pkg(cur_dir, dataset_name='PhC-C2DH-U373', dataset_type='challenge')
+
+    download_isbi(cur_dir, "training")
+    download_isbi(cur_dir, "challenge")
 
 
 def elastic_transform(image, alpha, sigma, random_state=None):
@@ -55,6 +102,7 @@ def elastic_transform(image, alpha, sigma, random_state=None):
     dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
     dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
 
+    # TODO: change to bicubic interpolation
     x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
     indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
 
@@ -87,7 +135,9 @@ class ImageDataset(Dataset):
         return transforms.ToTensor()(elastic_transform(self.image[idx], alpha=3, sigma=10)), \
                transforms.ToTensor()(elastic_transform(self.target[idx], alpha=3, sigma=10))
 
-
+if __name__ == "__main__":
+    download_all_data()
+    print('hello')
 # import cv2
 # import numpy as np
 # cur_dir = os.path.abspath('')
@@ -100,34 +150,34 @@ class ImageDataset(Dataset):
 # cv2.waitKey(0)
 # cv2.destroyAllWindows()
 
-if __name__ == '__main__':
-    import cv2
+# if __name__ == '__main__':
+#     import cv2
 
-    import numpy as np
-    cur_dir = os.path.abspath('')
-    print(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg067.tif"))
-    img = cv2.imread(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg005.tif"), -1)
-    # img_scaled = cv2.normalize(img, dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX)
-    img[img > 0] = 65535
-    img_scaled = img
-    print(np.max(img_scaled), np.min(img_scaled))
-    cv2.imshow("hello", img_scaled)
+#     import numpy as np
+#     cur_dir = os.path.abspath('')
+#     print(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg067.tif"))
+#     img = cv2.imread(os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training", "01_GT", "SEG", "man_seg005.tif"), -1)
+#     # img_scaled = cv2.normalize(img, dst=None, alpha=0, beta=65535, norm_type=cv2.NORM_MINMAX)
+#     img[img > 0] = 65535
+#     img_scaled = img
+#     print(np.max(img_scaled), np.min(img_scaled))
+#     cv2.imshow("hello", img_scaled)
 
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    exit()
-    # run this to download data
-    download_all_data()
+#     cv2.waitKey(0)
+#     cv2.destroyAllWindows()
+#     exit()
+#     # run this to download data
+#     download_all_data()
 
-    cur_dir = os.path.abspath('')
-    root_dir = os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training")
-    transformed_dataset = ImageDataset(root_dir)
+#     cur_dir = os.path.abspath('')
+#     root_dir = os.path.join(cur_dir, "data", "DIC-C2DH-HeLa-training")
+#     transformed_dataset = ImageDataset(root_dir)
 
-    # Testing
-    img, mask = transformed_dataset[0]
-    total = np.hstack((img.numpy().reshape((512, 512)), mask.numpy().reshape(512,512)))
-    cv2.imshow("hello", total)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+#     # Testing
+#     img, mask = transformed_dataset[0]
+#     total = np.hstack((img.numpy().reshape((512, 512)), mask.numpy().reshape(512,512)))
+#     cv2.imshow("hello", total)
+#     cv2.waitKey(0)
+#     cv2.destroyAllWindows()
 
-    dataloader = DataLoader(transformed_dataset, batch_size=4, shuffle=True, num_workers=4)
+#     dataloader = DataLoader(transformed_dataset, batch_size=4, shuffle=True, num_workers=4)
