@@ -43,14 +43,16 @@ num_epochs = 20
 batch_size = 4
 
 def weights_init(unet):
-    
-    #normal distribution
-    unet.init.normal_(tensor, mean=0, std=sqrt(2/N))
+    N = ... # N is the number of incoming nodes of one neuron
+
+    N1 = 1*9
+    nn.init.normal_(unet.conv11c.weight.data, 0.0, sqrt(2/N1))
+    ...
+
 
 
 
 def training(unet, device, transformed_dataset, epochs=num_epochs, batch_size=batch_size, learning_rate=0.001, momentum=0.99, val_per=0.3):
-    N = ... # N is the number of incoming nodes of one neuron
     # Weight Initialization
     unet.apply(weights_init)
 
