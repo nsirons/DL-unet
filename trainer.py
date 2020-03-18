@@ -6,6 +6,11 @@
 4) Define CrossEntopyLoss (weighted loss)
 5) Optimizer (SGD with momentum = 0.99, LR?)
 6) Define number of epochs, batch_size, maybe variable LR?
+
+Considerations:
+    Preprocessing?
+    Data augmentation?
+    Do we have to do something regarding GPUs? (load tensors or sth?)
 """
 
 import torch
@@ -41,59 +46,35 @@ if use_gpu:
 
 # Training 
 num_epochs = 20
-batch_size = 4
+batch_size = 100
 
-def training(unet, device, transformed_dataset, epochs=num_epochs, batch_size=batch_size, learning_rate=0.001, momentum=0.99, val_per=0.3):
+def training(unet, train_loader, epochs=num_epochs, batch_size=batch_size, learning_rate=0.001, momentum=0.99, val_per=0.3):
 
     # Definition of loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     # criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(unet.parameters(), lr=learning_rate, momentum=momentum)
 
-    # Creation of the batches
-    data_loader = DataLoader(transformed_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-
     for epoch in range(num_epochs):
 
-        total_loss = 0
-        total_correct = 0
+    #    total_loss = 0 # Why?
+    #    total_correct = 0 # Why?
 
         for batch in train_loader: # get batch
+
             images, labels = batch
 
             preds = unet(images) # pass batch to the unet
-            loss = criterion.(preds, labels) #c ompute the loss with the chosen criterion
+
+            weight_maps = functions.weighted_map(labels, batch_size)
+
+            loss = criterion(preds, labels) # compute the loss with the chosen criterion
 
             optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
             loss.backward() # compute the gradients using backprop
             optimizer.step() # update the weights
 
-            total_loss += loss.item()
-            total_correct += get_num_correct(preds,labels)
+    #        total_loss += loss.item()
+    #        total_correct += get_num_correct(preds,labels)
 
-        print("Epoch:", epoch, "total_correct:", total_correct, "loss:", total_loss)
-
-
-    # previous unfinished code:
-    
-    # Adapt this part to the actual dataset
-    dataset = torchvision.datasets.FashionMNIST(
-        root='./data/FashionMNIST',
-        train=True,
-        download=True,
-        transform=transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-    for epoch in range(num_epochs):
-
-        data_loader = DataLoader(
-            dataset,
-            batch_size=batch_size
-        )
-
-        batch = next(iter(data_loader))
-
-        images, labels = batch
-
-        w = functions.weighted_map(gt)
+        print("Epoch:", epoch)
