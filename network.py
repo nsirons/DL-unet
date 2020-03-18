@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 
 class Unet(nn.Module):
 
-""" Unet 2D implementation (Ronneberger et al. 2015)
+    """ Unet 2D implementation (Ronneberger et al. 2015)
 
     This network reproduces the Unet architecture described in Ronneberger et al. 2015.
     The structure of this network is made up of 23 convolutional layers including pooling 
@@ -15,9 +15,11 @@ class Unet(nn.Module):
     identify a contractive path and an expansive path with skip connections between both.
 
     Possible improvements: BN, padding to conv layers
-"""
+    """
+
     def __init__(self):
-        super(Unet, self).__init__() # (what does this do?)
+        super(Unet, self).__init__() 
+
         self.conv11c = nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3)
         self.conv12c = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3)
 
@@ -55,7 +57,57 @@ class Unet(nn.Module):
 
         self.finalconv = nn.Conv2d(in_channels=64, out_channels=2, kernel_size=1)
 
+        """ Initialization of the weights
+
+        We follow here the criteria provided by Ronneberger et al. (2015). Accordingly,
+        the weights should be initialized following a gaussian distribution of mean 0 
+        and standard deviation std = (2 / N) ** 0.5 with N being the number of incoming 
+        nodes of one neuron.
+
+        Example:
+        For a 3x3 convolution and 64 feature channels in the previous layer, N = 3 ** 2 * 64
+        
+
+        self.conv11c.weight = nn.Parameter(torch.empty_like(self.conv11c.weight).normal_(mean = 0, std = (2 ** 0.5)))
+        self.conv12c.weight = nn.Parameter(torch.empty_like(self.conv12c.weight).normal_(mean = 0, std = (2 / (self.conv12c.in_channels * float(self.conv11c.kernel_size) ** 2) ** 0.5)))
+
+        self.conv21c.weight = nn.Parameter(torch.empty_like(self.conv21c.weight).normal_(mean = 0, std = (2 / (self.conv21c.in_channels * float(self.conv12c.kernel_size) ** 2) ** 0.5)))
+        self.conv22c.weight = nn.Parameter(torch.empty_like(self.conv22c.weight).normal_(mean = 0, std = (2 / (self.conv22c.in_channels * float(self.conv21c.kernel_size) ** 2) ** 0.5)))
+
+        self.conv31c.weight = nn.Parameter(torch.empty_like(self.conv31c.weight).normal_(mean = 0, std = (2 / (self.conv31c.in_channels * float(self.conv22c.kernel_size) ** 2) ** 0.5)))
+        self.conv32c.weight = nn.Parameter(torch.empty_like(self.conv32c.weight).normal_(mean = 0, std = (2 / (self.conv32c.in_channels * float(self.conv31c.kernel_size) ** 2) ** 0.5)))
+
+        self.conv41c.weight = nn.Parameter(torch.empty_like(self.conv41c.weight).normal_(mean = 0, std = (2 / (self.conv41c.in_channels * float(self.conv32c.kernel_size) ** 2) ** 0.5)))
+        self.conv42c.weight = nn.Parameter(torch.empty_like(self.conv42c.weight).normal_(mean = 0, std = (2 / (self.conv42c.in_channels * float(self.conv41c.kernel_size) ** 2) ** 0.5)))
+
+        self.conv51c.weight = nn.Parameter(torch.empty_like(self.conv51c.weight).normal_(mean = 0, std = (2 / (self.conv51c.in_channels * float(self.conv42c.kernel_size) ** 2) ** 0.5)))
+        self.conv52c.weight = nn.Parameter(torch.empty_like(self.conv52c.weight).normal_(mean = 0, std = (2 / (self.conv52c.in_channels * float(self.conv51c.kernel_size) ** 2) ** 0.5)))
+
+        self.upconv4.weight = nn.Parameter(torch.empty_like(self.upconv4.weight).normal_(mean = 0, std = (2 / (self.upconv4.in_channels * float(self.conv52c.kernel_size) ** 2) ** 0.5)))
+
+        self.conv41e.weight = nn.Parameter(torch.empty_like(self.conv41e.weight).normal_(mean = 0, std = (2 / (self.conv42c.out_channels * float(self.conv42c.kernel_size) ** 2 + self.unconv4.out_channels * float(self.unconv4.kernel_size) ** 2) ** 0.5)))
+        self.conv42e.weight = nn.Parameter(torch.empty_like(self.conv42e.weight).normal_(mean = 0, std = (2 / (self.conv42e.in_channels * float(self.conv41e.kernel_size) ** 2) ** 0.5)))
+
+        self.upconv3.weight = nn.Parameter(torch.empty_like(self.upconv3.weight).normal_(mean = 0, std = (2 / (self.upconv3.in_channels * float(self.conv42e.kernel_size) ** 2) ** 0.5)))
+
+        self.conv31e.weight = nn.Parameter(torch.empty_like(self.conv31e.weight).normal_(mean = 0, std = (2 / (self.conv32c.out_channels * float(self.conv32c.kernel_size) ** 2 + self.upconv3.out_channels * float(self.unconv3.kernel_size) ** 2) ** 0.5)))
+        self.conv32e.weight = nn.Parameter(torch.empty_like(self.conv32e.weight).normal_(mean = 0, std = (2 / (self.conv32e.in_channels * float(self.conv31e.kernel_size) ** 2) ** 0.5)))
+
+        self.upconv2.weight = nn.Parameter(torch.empty_like(self.upconv2.weight).normal_(mean = 0, std = (2 / (self.upconv2.in_channels * float(self.conv32e.kernel_size) ** 2) ** 0.5)))
+
+        self.conv21e.weight = nn.Parameter(torch.empty_like(self.conv21e.weight).normal_(mean = 0, std = (2 / (self.conv22c.out_channels * float(self.conv22c.kernel_size) ** 2 + self.upconv2.out_channels * float(self.unconv2.kernel_size) ** 2) ** 0.5)))
+        self.conv22e.weight = nn.Parameter(torch.empty_like(self.conv22e.weight).normal_(mean = 0, std = (2 / (self.conv22e.in_channels * float(self.conv21e.kernel_size) ** 2) ** 0.5)))
+
+        self.upconv1.weight = nn.Parameter(torch.empty_like(self.upconv1.weight).normal_(mean = 0, std = (2 / (self.upconv1.in_channels * float(self.conv22e.kernel_size) ** 2) ** 0.5)))
+
+        self.conv11e.weight = nn.Parameter(torch.empty_like(self.conv11e.weight).normal_(mean = 0, std = (2 / (self.conv12c.out_channels * float(self.conv12c.kernel_size) ** 2 + self.upconv1.out_channels * float(self.unconv1.kernel_size) ** 2) ** 0.5)))
+        self.conv12e.weight = nn.Parameter(torch.empty_like(self.conv12e.weight).normal_(mean = 0, std = (2 / (self.conv12e.in_channels * float(self.conv11e.kernel_size) ** 2) ** 0.5)))
+
+        self.finalconv.weight = nn.Parameter(torch.empty_like(self.finalconv.weight).normal_(mean = 0, std = (2 / (self.finalconv.in_channels * float(self.conv12e.kernel_size) ** 2) ** 0.5)))
+        """
+
     def crop_and_concat(self, A, B):
+        
         """ Crop and concatenation (for skip connections)
             
             We use this simple function to crop the tensor (H and W) from the contractive 
@@ -69,6 +121,7 @@ class Unet(nn.Module):
             Output:
                 - Concatenated (axis=1) tensor 
         """
+
         crop_factor=(A.size()[2] - B.size()[2]) * 0.5
         c=int(crop_factor)
         A = F.pad(A, (-c, -c, -c, -c))
