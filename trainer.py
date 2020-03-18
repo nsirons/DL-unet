@@ -24,7 +24,7 @@ import network
 import functions
 import data
 
-# from torch.utils.tensorboard import SummaryWriter 
+# from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, random_split
 
 from tqdm import tqdm # See progress in terminal
@@ -53,27 +53,27 @@ def training(unet, train_loader, epochs=num_epochs, batch_size=batch_size, learn
     criterion = nn.CrossEntropyLoss()
     # criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(unet.parameters(), lr=learning_rate, momentum=momentum)
-
+#      print("BSA")
     for epoch in range(num_epochs):
 
     #    total_loss = 0 # Why?
     #    total_correct = 0 # Why?
-
+#          print("BSA")
         for batch in train_loader: # get batch
-
+#             print("BSA")
+#             print(batch)
             images, labels = batch
-            print("BATCH START")
-            print(images)
+            print(images.shape)
             preds = unet(images) # pass batch to the unet
-            print("BATCH NETWORK ")
+
             weight_maps = functions.weighted_map(labels, batch_size)
 
             loss = criterion(preds, labels) # compute the loss with the chosen criterion
-            print("BATCH loss")
+
             optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
             loss.backward() # compute the gradients using backprop
             optimizer.step() # update the weights
-            print("BATCH END")
+
     #        total_loss += loss.item()
     #        total_correct += get_num_correct(preds,labels)
 
