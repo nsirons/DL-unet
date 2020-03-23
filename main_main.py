@@ -6,6 +6,7 @@ from scipy.ndimage.interpolation import map_coordinates
 from scipy import interpolate
 import cv2 as cv
 import os
+from sklearn.metrics import f1_score
 
 import torchvision
 from torch.utils.data import Dataset, DataLoader
@@ -54,69 +55,16 @@ download_all_data()
 # DATASET = 'ISBI2012'
 DATASET = 'DIC-C2DH-HeLa'
 
+#MODE = "TRAINING"
+MODE = "TESTING"
+if MODE == "TESTING":
+    model_path = "unet_weight_save_5000.pth"
+else:
+    model_path = None
+
 target_path = os.path.join(CUR_DIR, "data", f"{DATASET}-training", "01_GT", "SEG")
 training_path = os.path.join(CUR_DIR, "data", f"{DATASET}-training", "01")
 target = os.listdir(target_path)
-# for i in range(len(target)):
-# for i in range(1):
-#     # load images
-#     img = cv.imread(os.path.join(target_path, target[i]), -1)
-#     img_og = cv.imread(os.path.join(training_path, f"t{target[i][7:]}"))
-    
-    
-#     # image morphology, for edge detection (ONLY FOR DIC-C2DH-HeLa, since cells intersect)
-#     gt, mask_global = preprocess_gt(img)
-#     if DATASET != "DIC-C2DH-HeLa":
-#         gt = img
-#     fig = plt.figure(figsize=(16,9))
-#     plt.subplot(1,5,1)
-#     plt.imshow(img_og)
-#     plt.title("Original")
-#     plt.subplot(1,5,2)
-#     plt.imshow(img)
-#     plt.title('Segmented')
-#     plt.subplot(1,5,3)
-#     plt.title('Edge mask')
-#     plt.imshow(mask_global > 0, cmap='gray')  # binary of cell edges
-#     plt.subplot(1,5,4)
-
-#     _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
-#     plt.imshow(gt_bin, cmap='gray')
-#     plt.title('Ground truth')
-    
-#     # Calculating loss for ground truth
-#     wc = np.zeros(img.shape)
-#     for cls in np.unique(img):
-#         s = np.sum(img==cls)
-#         wc[gt==cls] = 1/s
-#     wc = wc / np.max(wc)  # normalize
-    
-#     w0 = 10
-#     sigma = 5
-#     d1 = img.shape[0]*img.shape[1]*np.ones(img.shape)
-#     d2 = np.zeros(img.shape)
-
-#     dsts = []
-#     for cls in np.unique(img)[1:]:
-#         new_bin = np.zeros(img.shape)
-#         a = gt!=cls
-#         b = gt!=0
-#         new_bin[a & b] = 255
-#         gt_bin = 255-new_bin.astype(np.uint8)
-#         dst = cv.distanceTransform(src=gt_bin, distanceType=cv.DIST_L2, maskSize=3)
-#         d1 = np.minimum(d1, dst)
-#         d2 = np.maximum(d2, dst)
-    
-#     loss_img = wc + w0*np.exp(-(d1+d2)**2 / (2*sigma**2))
-#     loss_img[gt > 0] = np.nan  # cells dont have loss (or loss=0?)
-    
-#     plt.subplot(1,5,5)
-#     plt.imshow(loss_img, cmap='jet')
-    
-#     plt.title("Pixel-wise weight loss")
-#     plt.show()
-
-
 
 def elastic_transform(images, alpha, sigma, random_state=None):
     """Elastic deformation of images as described in [Simard2003]_.
@@ -142,143 +90,99 @@ def elastic_transform(images, alpha, sigma, random_state=None):
     return (map_coordinates(image, indices, order=1).reshape(shape) for image in images)
 
 def mirror_transform(image):
+    n = len(image)
+    pad = (572 - n) // 2
     new_image = np.zeros((572, 572))
-    new_image[92:92+388, 92: 92+388] = image
-    new_image[:92, 92:92 + 388] = image[92:0:-1, 0:388]  # left side
-    new_image[:92, :92] = new_image[0:92, 92+92:92:-1]  # top left
-    new_image[:92, 92+388:] = new_image[0:92, 388+91:388-1:-1]  # bot left
-    new_image[388+92:, 92:92 + 388] = image[388:388-93:-1, 0:388]  # right side
-    new_image[388+92:, :92] = new_image[388+92:, 92+92:92:-1]  # top right
-    new_image[388+92:, 388+92:] = new_image[388+92:, 388+91:388-1:-1]  # bot right
-    new_image[92:388+92, 0:92] = image[:, 92:0:-1] # top side
-    new_image[92:388+92, 388+92:] = image[:, 388-1:388-1-92:-1]  # bot side
+    new_image[pad:pad+n, pad: pad+n] = image
+    new_image[:pad, pad:pad + n] = image[pad:0:-1, 0:n]  # left side
+    new_image[:pad, :pad] = new_image[0:pad, pad+pad:pad:-1]  # top left
+    new_image[:pad, pad+n:] = new_image[0:pad, n+pad-1:n-1:-1]  # bot left
+    new_image[n+pad:, pad:pad + n] = image[n:n-pad-1:-1, 0:n]  # right side
+    new_image[n+pad:, :pad] = new_image[n+pad:, pad+pad:pad:-1]  # top right
+    new_image[n+pad:, n+pad:] = new_image[n+pad:, n+pad-1:n-1:-1]  # bot right
+    new_image[pad:n+pad, 0:pad] = image[:, pad:0:-1] # top side
+    new_image[pad:n+pad, n+pad:] = image[:, n-1:n-1-pad:-1]  # bot side
     return new_image
 
 class ImageDataset(Dataset):
     
-    def __init__(self, root_dir, alpha=3, sigma=10):
+    def __init__(self, root_dir, alpha=3, sigma=10, transform=True):
         self.root_dir = root_dir
         self.alpha = alpha
         self.sigma = sigma
 
-        self.image_path = []
-        self.target_path = []
+        self.image = []
+        self.target = []
+        self.transform = transform
 
         n = len(os.listdir(root_dir)) // 3
         for i in range(1, n+1):
             image_folder = os.path.join(root_dir, f"0{i}")
             target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
             image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
-            
-#             self.image.extend(cv.imread(os.path.join(image_folder, image_name), -1) for image_name in image_names)
-            self.image_path.extend(os.path.join(image_folder, image_name) for image_name in image_names)
+            self.image.extend(cv.imread(os.path.join(image_folder, image_name),-1) for image_name in image_names)
             for filename in os.listdir(target_folder):
-#                 img = cv.imread(os.path.join(target_folder, filename), -1)
-#                 gt, _ = preprocess_gt(img)
-#                 _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
-                self.target_path.append(os.path.join(target_folder, filename))
+                img = cv.imread(os.path.join(target_folder, filename), -1)
+                gt, _ = preprocess_gt(img)
+                _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
+                self.target.append(gt_bin)
 
 
     def __len__(self):
-        return 4*len(self.image_path)
+        if self.transform:
+            return len(self.image)
+        return 4*len(self.image)  # hardcoded
 
     def __getitem__(self, idx):
-        i = idx // 4
-        x = (512-388)*(idx % 2)
-        y = (512-388)*((idx-4*i) // 2)
+        if self.transform:
+            # get images
+            image = self.image[idx]
+            target = self.target[idx]
+            # random crop
+            x = np.random.randint(0, 512-388)
+            y = np.random.randint(0, 512-388)
+            # mirror border
+            image = mirror_transform(image[x:x+388, y:y+388])
+            target = mirror_transform(target[x:x+388, y:y+388])
+            # perform same elastic transformation 
+            inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
+        else:
+            # TODO: hardcoded
+            i = idx // 4
+            x = (512-388)*(idx % 2)
+            y = (512-388)*((idx-4*i) // 2)
+            inp = mirror_transform(self.image[i][x:x+388, y:y+388])
+            gt = mirror_transform(self.target[i][x:x+388, y:y+388])
         
-        # read images
-        image = cv.imread(self.image_path[i], -1)
-        target = cv.imread(self.target_path[i], -1)
-        target, _ =preprocess_gt(target)
-        _, target = cv.threshold(target, 0, 255, cv.THRESH_BINARY)
-        
-        image = mirror_transform(image[x:x+388, y:y+388])
-        target = mirror_transform(target[x:x+388, y:y+388])
-        
-        inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
-        gt = gt[92:388+92, 92:388+92]
-        gt[gt > 0] = 1
-        inp = inp / np.max(inp)
+        gt = gt[92:388+92, 92:388+92]  # crop gt
+        _, gt = cv.threshold(gt, 127, 255, cv.THRESH_BINARY)
+        gt = gt / 255  # normalize to [0 1]
+        inp = (inp - np.min(inp))/np.ptp(inp)  # normalize to [0 1]
         return transforms.ToTensor()(inp.astype('float32')), \
                transforms.ToTensor()(gt).long()
 
 
 # init ImageDataset
 root_dir = os.path.join(CUR_DIR, "data", "DIC-C2DH-HeLa-training")
-transformed_dataset = ImageDataset(root_dir, alpha=250, sigma=10)
+transformed_dataset = ImageDataset(root_dir, alpha=200, sigma=10)
+clean_dataset = ImageDataset(root_dir, transform=False)
 val_per = 0.3
 batch_size = 1
-train_set, val_set = torch.utils.data.random_split(transformed_dataset, [int(len(transformed_dataset) * (1-val_per)), int(len(transformed_dataset) * val_per)+1])
+train_size = int(len(transformed_dataset)*(1-val_per))
+train_set = torch.utils.data.Subset(transformed_dataset, range(train_size))  # from 0 ... train_size
+test_train_transform_set = torch.utils.data.Subset(transformed_dataset, range(train_size, len(transformed_dataset)))  # from train_size ... end
+test_clean_set = torch.utils.data.Subset(clean_dataset, range(4*train_size, len(clean_dataset)))  # TODO: 4 hardcoded
+
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0)
-# visualise augmentation
-# for i in range(1):
-#     img, gt = transformed_dataset[i]
-#     fig = plt.figure()
-#     ax1 = fig.add_subplot(131)
-#     ax2 = fig.add_subplot(132)
-#     ax3 = fig.add_subplot(133)
-#     ax1.imshow(img.reshape(img.shape[1:]), cmap='gray')
-#     rect = patches.Rectangle((92,92),388,388,linewidth=1,edgecolor='r',facecolor='none')
-#     # Add the patch to the Axes
-#     ax1.add_patch(rect)
-#     ax1.set_title("Augmented Input")
-#     gt = gt[0,:,:].reshape((1,388,388))
-#     gt = gt.reshape(gt.shape[1:]).numpy().astype(np.uint8)
-#     contours, hierarchy = cv.findContours(gt, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
-#     image = cv.cvtColor(img.reshape(img.shape[1:])[92:92+388,92:92+388].numpy().astype(np.uint8),cv.COLOR_GRAY2RGB)
-#     cv.drawContours(image, contours, -1, (0, 255, 0), 3)
-#     ax2.imshow(image)
-#     ax2.set_title("Input with target contour")
+test_train_transform_loader = DataLoader(test_train_transform_set, batch_size=batch_size, shuffle=False)
+test_clean_loader = DataLoader(test_clean_set, batch_size=1, shuffle=False)
 
-#     ax3.imshow(gt, cmap='gray')
-#     ax3.set_title("Augmented Target")
-#     fig.tight_layout()
-#     plt.show()
-
-""" Training scheme:
-
-1) Definition of the dataloaders for training and testing sets
-2) Initialization of the weights (Gaussian, mean = 0 (?), std = sqrt(2/N))
-3) Computation of the weight map (including computation of d1 and d2)    #I think this part has to be removed (the weight map is used in the main for the gt)
-4) Define CrossEntopyLoss (weighted loss)
-5) Optimizer (SGD with momentum = 0.99, LR?)
-6) Define number of epochs, batch_size, maybe variable LR?
-
-Considerations:
-    Preprocessing?
-    Data augmentation?
-    Do we have to do something regarding GPUs? (load tensors or sth?)
-"""
-
-def custom_loss(pred, label, weights):
-    batch_size, c, h, w = pred.shape
-    logp = F.log_softmax(pred, dim=1)  # added - sign
-
-    # Gather log probabilities with respect to target
-    logp = logp.gather(1, label.view(batch_size, 1, h, w))
-#     plt.imshow(logp.detach().numpy()[0,0,:,:], cmap='gray')
-#     plt.colorbar()
-#     plt.show()
-#     print(logp.shape)
-    # Multiply with weights
-    weighted_logp = (logp * weights).view(batch_size, -1)
-
-    # Rescale so that loss is in approx. same interval
-    weighted_loss = weighted_logp.sum(1) / weights.view(batch_size, -1).sum(1)
-    
-    # Average over mini-batch
-    weighted_loss = -weighted_loss.mean()
-    return weighted_loss
 
 def training(unet, train_loader, epochs, batch_size, device):
-    
     learning_rate=0.0001
     momentum=0.99
 
     # Definition of loss function and optimizer
-    #criterion = nn.CrossEntropyLoss()
-    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(unet.parameters(), lr=learning_rate, momentum=momentum)
 
     for epoch in range(epochs):
@@ -287,35 +191,26 @@ def training(unet, train_loader, epochs, batch_size, device):
             images, labels = batch
             optimizer.zero_grad()
             preds = unet(images.to(device)) # pass batch to the unet
-            #weight_maps = weighted_map(labels, batch_size).to(device)
-            #labels = labels.numpy()
             ll = np.zeros((1,2,388,388))
-            ll[:,0,:,:] = labels
-            ll[:,1,:,:] = 1 - labels
+            ll[:,0,:,:] = 1 - labels  # background
+            ll[:,1,:,:] = labels  # cell
             ll = torch.from_numpy(ll).to(device)
-            loss = criterion(preds,ll) 
-            #loss = criterion(preds, labels.to(device).reshape((1, 388,388)))
-            weight_maps = weighted_map(labels, batch_size)
-            print(weight_maps.max(), weight_maps.min())
-            return 0
-            #weight_maps = torch.from_numpy(np.ones(weight_maps.shape)).to(device)
-            #loss = custom_loss(preds, labels.to(device), weight_maps) # compute the loss with the chosen criterion
-            # print("BATCH loss", loss)
-            #optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
+            weight_maps = weighted_map(labels, batch_size).to(device)
+            criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+            loss = criterion(preds, ll)
             loss.backward() # compute the gradients using backprop
             optimizer.step() # update the weights
             m += loss
         print("Epoch:", epoch, m / len(train_loader))
     
-        if epoch % 100 == 0:
-            PATH = './unet_save_{}.pth'.format(epoch)
+        if epoch % 500 == 0:
+            PATH = './unet_weight_save_{}.pth'.format(epoch)
             torch.save(unet.state_dict(), PATH)
         #if epoch % 5 == 0:
         #    # Save after training
-        #    PATH = './unet_save_5.pth'
+        #    PATH = './unet_weight_save_5.pth'
         #    torch.save(unet.state_dict(), PATH)
         
-# unet = Unet()
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
     print("Running on the GPU")
@@ -324,6 +219,52 @@ else:
     print("Running on the CPU")
 
 torch.cuda.empty_cache()
-# torch.cuda.clear_memory_allocated() 
 unet = Unet().to(device)
-training(unet, train_loader,1251,train_loader.batch_size, device)
+if MODE == "TRAINING":
+    training(unet, train_loader,5001,train_loader.batch_size, device)
+elif MODE == "TESTING":
+    if 'output' not in os.listdir(os.path.join(CUR_DIR, 'data')):
+        os.mkdir(os.path.join(CUR_DIR, 'data', 'output'))
+
+    unet.load_state_dict(torch.load(model_path))
+    pixel_error = 0
+    for i, batch in enumerate(test_clean_loader):
+        if i % 4 == 0:
+            final_pred = np.zeros((512,512))
+            final_overlap_times = np.zeros((512,512))
+            fig = plt.figure(figsize=(16, 9))
+
+        ax1 = fig.add_subplot(5,3,3*(i%4)+1)
+        ax2 = fig.add_subplot(5,3,3*(i%4)+2)
+        ax3 = fig.add_subplot(5,3,3*(i%4)+3)
+
+        x = (512-388)*(i % 2)
+        y = (512-388)*((i-4*(i//4)) // 2)
+        images, labels = batch
+        
+        ax1.imshow(images.numpy()[:,:,92:92+388, 92:92+388].reshape((388,388)), cmap='gray')
+        ax2.imshow(labels.numpy().reshape((388,388)), cmap='gray')
+
+        preds = unet(images.to(device)).argmax(dim=1).to("cpu").detach().numpy().reshape((388,388))
+        
+        final_pred[x:x+388, y:y+388] += preds
+        final_overlap_times[x:x+388, y:y+388] += np.ones((388, 388))
+        
+        ax3.imshow(preds, cmap='gray')
+
+        if i % 4 == 3:
+            final_pred = np.multiply(final_pred, 1/final_overlap_times)
+            final_pred = (final_pred >= 0.5).astype('uint')
+            axf = fig.add_subplot(5,3,13)
+            axf.imshow(final_pred, cmap='gray')
+            fig.tight_layout()
+            fig.savefig(os.path.join(CUR_DIR, 'data', 'output', f'final_weight_{i//4}.png'))
+        
+        labels = labels.reshape((388*388,1))
+        preds = preds.reshape((388*388,1))
+        
+        pixel_error_patch = 1-f1_score(labels, preds)
+        pixel_error += pixel_error_patch
+        print(pixel_error_patch)
+    print(f"Average pixel error over all patches: {pixel_error/len(test_clean_loader):0.4f}")
+
