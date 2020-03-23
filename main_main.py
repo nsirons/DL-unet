@@ -180,7 +180,7 @@ class ImageDataset(Dataset):
 
 
     def __len__(self):
-        return 1*len(self.image_path)
+        return 4*len(self.image_path)
 
     def __getitem__(self, idx):
         i = idx // 4
@@ -199,6 +199,7 @@ class ImageDataset(Dataset):
         inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
         gt = gt[92:388+92, 92:388+92]
         gt[gt > 0] = 1
+        inp = inp / np.max(inp)
         return transforms.ToTensor()(inp.astype('float32')), \
                transforms.ToTensor()(gt).long()
 
@@ -206,7 +207,7 @@ class ImageDataset(Dataset):
 # init ImageDataset
 root_dir = os.path.join(CUR_DIR, "data", "DIC-C2DH-HeLa-training")
 transformed_dataset = ImageDataset(root_dir, alpha=250, sigma=10)
-val_per = 0.9
+val_per = 0.3
 batch_size = 1
 train_set, val_set = torch.utils.data.random_split(transformed_dataset, [int(len(transformed_dataset) * (1-val_per)), int(len(transformed_dataset) * val_per)+1])
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0)
@@ -252,7 +253,7 @@ Considerations:
 
 def custom_loss(pred, label, weights):
     batch_size, c, h, w = pred.shape
-    logp = -F.log_softmax(pred)  # added - sign
+    logp = F.log_softmax(pred, dim=1)  # added - sign
 
     # Gather log probabilities with respect to target
     logp = logp.gather(1, label.view(batch_size, 1, h, w))
@@ -267,39 +268,53 @@ def custom_loss(pred, label, weights):
     weighted_loss = weighted_logp.sum(1) / weights.view(batch_size, -1).sum(1)
     
     # Average over mini-batch
-    weighted_loss = weighted_loss.mean()
+    weighted_loss = -weighted_loss.mean()
     return weighted_loss
 
 def training(unet, train_loader, epochs, batch_size, device):
     
-    learning_rate=0.001
+    learning_rate=0.0001
     momentum=0.99
 
     # Definition of loss function and optimizer
-    # criterion = nn.CrossEntropyLoss()
-    # criterion = nn.BCEWithLogitsLoss()
+    #criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(unet.parameters(), lr=learning_rate, momentum=momentum)
 
     for epoch in range(epochs):
-
+        m = 0
         for batch in train_loader: # get batch
-            print("BATCH START")
             images, labels = batch
+            optimizer.zero_grad()
             preds = unet(images.to(device)) # pass batch to the unet
-            print("BATCH NETWORK")
-            weight_maps = weighted_map(labels, batch_size).to(device)
-            loss = custom_loss(preds, labels.to(device), weight_maps) # compute the loss with the chosen criterion
-            print("BATCH loss", loss)
-            optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
+            #weight_maps = weighted_map(labels, batch_size).to(device)
+            #labels = labels.numpy()
+            ll = np.zeros((1,2,388,388))
+            ll[:,0,:,:] = labels
+            ll[:,1,:,:] = 1 - labels
+            ll = torch.from_numpy(ll).to(device)
+            loss = criterion(preds,ll) 
+            #loss = criterion(preds, labels.to(device).reshape((1, 388,388)))
+            weight_maps = weighted_map(labels, batch_size)
+            print(weight_maps.max(), weight_maps.min())
+            return 0
+            #weight_maps = torch.from_numpy(np.ones(weight_maps.shape)).to(device)
+            #loss = custom_loss(preds, labels.to(device), weight_maps) # compute the loss with the chosen criterion
+            # print("BATCH loss", loss)
+            #optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
             loss.backward() # compute the gradients using backprop
             optimizer.step() # update the weights
-            print("BATCH END")
-        print("Epoch:", epoch)
+            m += loss
+        print("Epoch:", epoch, m / len(train_loader))
     
-    # Save after training
-    PATH = './unet_save.pth'
-    torch.save(unet.state_dict(), PATH)
-
+        if epoch % 100 == 0:
+            PATH = './unet_save_{}.pth'.format(epoch)
+            torch.save(unet.state_dict(), PATH)
+        #if epoch % 5 == 0:
+        #    # Save after training
+        #    PATH = './unet_save_5.pth'
+        #    torch.save(unet.state_dict(), PATH)
+        
 # unet = Unet()
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -311,4 +326,4 @@ else:
 torch.cuda.empty_cache()
 # torch.cuda.clear_memory_allocated() 
 unet = Unet().to(device)
-training(unet, train_loader,1,train_loader.batch_size, device)
+training(unet, train_loader,1251,train_loader.batch_size, device)
