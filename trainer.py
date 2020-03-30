@@ -1,75 +1,91 @@
-""" Training scheme:
-
-1) Definition of the dataloaders for training and testing sets
-2) Initialization of the weights (Gaussian, mean = 0 (?), std = sqrt(2/N))
-3) Computation of the weight map (including computation of d1 and d2)    #I think this part has to be removed (the weight map is used in the main for the gt)
-4) Define CrossEntopyLoss (weighted loss)
-5) Optimizer (SGD with momentum = 0.99, LR?)
-6) Define number of epochs, batch_size, maybe variable LR?
-
-Considerations:
-    Preprocessing?
-    Data augmentation?
-    Do we have to do something regarding GPUs? (load tensors or sth?)
-"""
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
-import torchvision
-import torchvision.transforms as transforms
-
-import network
-import functions
-import data
+from functions import weighted_map
 
 # from torch.utils.tensorboard import SummaryWriter 
-from torch.utils.data import DataLoader, random_split
+# from tqdm import tqdm # See progress in terminal
 
-from tqdm import tqdm # See progress in terminal
+def training(unet, train_loader, epochs, batch_size, device):
 
-# Initialization of the network
-unet = network.Unet()
-
-#Check for available GPUs
-use_gpu = torch.cuda.is_available()
-
-if use_gpu:
-    unet = unet.cuda()
-
-def training(unet, train_loader, epochs, batch_size):
-    
-    learning_rate=0.001
+    learning_rate=0.0001
     momentum=0.99
 
     # Definition of loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
-    # criterion = nn.BCEWithLogitsLoss()
+
+    # criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
+    # criterion = custom_loss()
+
     optimizer = optim.SGD(unet.parameters(), lr=learning_rate, momentum=momentum)
 
-    for epoch in range(num_epochs):
+    for epoch in range(epochs):
+        
+        print(' ')
+        print('Epoch:', epoch)
+
+        total_loss = 0
+
+        batch_id = 0
 
         for batch in train_loader: # get batch
 
+            optimizer.zero_grad()
+
+            print(' BATCH START', batch_id)
+
+            print(' Batch to network:')
             images, labels = batch
-            print("BATCH START")
+            preds = unet(images.to(device)) # pass batch to the unet
+            print(' done')
 
-            preds = unet(images) # pass batch to the unet
+            ll = torch.empty_like(preds)
+            ll[:,0,:,:] = 1 - labels  # background
+            ll[:,1,:,:] = labels  # cell
+            ll = ll.to(device)
 
-            print("BATCH NETWORK")
+            weight_maps = weighted_map(labels, batch_size).to(device)
+            criterion = criterion(weight=weight_maps)
+            loss = criterion(preds, ll)
+            print(' Batch loss:', loss)
 
-            weight_maps = functions.weighted_map(labels, batch_size)
-
-            print(preds.shape, labels.shape, weight_maps.shape)
-
-            loss = criterion(preds, labels) # compute the loss with the chosen criterion
-
-            print("BATCH loss")
-
-            optimizer.zero_grad() # set the gradient to zero (needed for the loop structure used to avoid the new gradients computed are added to the old ones)
+            print(' Updating weights...')
             loss.backward() # compute the gradients using backprop
             optimizer.step() # update the weights
-            print("BATCH END")
+            print(' done')
 
-        print("Epoch:", epoch)
+            total_loss += loss
+
+            batch_id =+ 1
+
+        print('Total loss:', total_loss / len(train_loader))
+        print(' ')
+    
+        # Save model every 500 epochs
+        if epoch % 500 == 0:
+            PATH = './unet_weight_save_{}.pth'.format(epoch)
+            torch.save(unet.state_dict(), PATH)
+            
+def custom_loss(pred, label, weights):
+    batch_size, c, h, w = pred.shape
+    logp = -F.log_softmax(pred)  # added - sign
+
+    # Gather log probabilities with respect to target
+    logp = logp.gather(1, label.view(batch_size, 1, h, w))
+    # plt.imshow(logp.detach().numpy()[0,0,:,:], cmap='gray')
+    # plt.colorbar()
+    # plt.show()
+    # print(logp.shape)
+    # Multiply with weights
+    weighted_logp = (logp * weights).view(batch_size, -1)
+
+    # Rescale so that loss is in approx. same interval
+    weighted_loss = weighted_logp.sum(1) / weights.view(batch_size, -1).sum(1)
+    
+    # Average over mini-batch
+    weighted_loss = weighted_loss.mean()
+    return weighted_loss
