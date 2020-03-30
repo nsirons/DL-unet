@@ -5,6 +5,69 @@ import cv2 as cv
 
 from PIL import Image
 import numpy as np
+from scipy.ndimage import gaussian_filter
+from scipy.ndimage.interpolation import map_coordinates
+from scipy import interpolate
+
+
+def preprocess_gt(img):
+    kernel = cv.getStructuringElement(cv.MORPH_RECT,(5,5))
+    mask_global = np.zeros(img.shape)
+    for cls in np.unique(img):
+        if cls == 0:  # if not a background
+            continue
+        mask_cls = np.zeros(img.shape)
+        mask_cls[img==cls] = 255  # binary image of cell
+        dilated = cv.dilate(mask_cls, kernel, iterations=2)
+        mask_global += dilated-mask_cls  # add edge to global mask
+#         mask += cv.erode(dilated-thresh,kernel2,iterations=1) 
+#         mask +=  cv.morphologyEx(dilated-thresh, cv.MORPH_OPEN, kernel)
+    
+    gt = img - mask_global # edges of cells will be background on the new ground truth
+    gt[gt<0] = 0  # clipping
+    
+    return gt, mask_global
+
+
+def elastic_transform(images, alpha, sigma, random_state=None):
+    """Elastic deformation of images as described in [Simard2003]_.
+    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+       Convolutional Neural Networks applied to Visual Document Analysis", in
+       Proc. of the International Conference on Document Analysis and
+       Recognition, 2003.
+       source: https://gist.github.com/chsasank/4d8f68caf01f041a6453e67fb30f8f5a
+    """
+
+    if random_state is None:
+        random_state = np.random.RandomState(None)
+
+    shape = images[0].shape
+    
+    # Generate field
+    dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+    dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+
+    x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
+    
+    # bicubic interpolation
+    return (map_coordinates(image, indices, order=3).reshape(shape) for image in images)
+
+
+def mirror_transform(image):
+    n = len(image)
+    pad = (572 - n) // 2
+    new_image = np.zeros((572, 572))
+    new_image[pad:pad+n, pad: pad+n] = image
+    new_image[:pad, pad:pad + n] = image[pad:0:-1, 0:n]  # left side
+    new_image[:pad, :pad] = new_image[0:pad, pad+pad:pad:-1]  # top left
+    new_image[:pad, pad+n:] = new_image[0:pad, n+pad-1:n-1:-1]  # bot left
+    new_image[n+pad:, pad:pad + n] = image[n:n-pad-1:-1, 0:n]  # right side
+    new_image[n+pad:, :pad] = new_image[n+pad:, pad+pad:pad:-1]  # top right
+    new_image[n+pad:, n+pad:] = new_image[n+pad:, n+pad-1:n-1:-1]  # bot right
+    new_image[pad:n+pad, 0:pad] = image[:, pad:0:-1] # top side
+    new_image[pad:n+pad, n+pad:] = image[:, n-1:n-1-pad:-1]  # bot side
+    return new_image
 
 
 def download_data_pkg(cur_dir, dataset_name,  dataset_type):
