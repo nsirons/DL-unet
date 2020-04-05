@@ -70,3 +70,91 @@ def weighted_map(gt_batch, batch_size):
         w_batch[batch_pos, :, :] = w.clone().detach()
 
     return w_batch
+
+
+
+def input_size_compute(image):
+    ''' Computes what the network's input image size should be so that it outputs the smallest image with a size over the
+        original image. The difference between original image's size and network's input image should be mirrored.
+
+        Input: 
+            - image: original image from the dataset. Expects Tensor of shape [(batch_size), (num_channels), original_size, original_size].
+
+        Outputs:
+            - original_size: size (H or W) of the original image from the dataset.
+            - input_size: size (H or W) of the network's input image.
+            - output_size: size (H or W) of the network's output image.
+    '''
+    original_size = image.shape[-1]
+    lowest_res = 20
+
+    # We compute a viable input size by setting the lowest resolution in the network's processing.
+    input_size  = (((lowest_res * 2 + 4) * 2 + 4) * 2 + 4) * 2 + 4
+    output_size = ((((lowest_res - 4) * 2 - 4) * 2 - 4) * 2 - 4) * 2 - 4
+
+    while output_size < original_size:
+        lowest_res += 1
+
+        input_size  = (((lowest_res * 2 + 4) * 2 + 4) * 2 + 4) * 2 + 4
+        output_size = ((((lowest_res - 4) * 2 - 4) * 2 - 4) * 2 - 4) * 2 - 4
+
+    return original_size, input_size, output_size
+
+
+
+def evaluation_metrics(pred, label):
+    ''' Intersection over Union (IoU) and pixel error (or squared Euclidean distance) between labels and predictions.
+        Inputs:
+            - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
+            - labels: labels tensor. Torch tensor of shape [num_patches, H, W].
+
+        Output:
+            - iou: float.
+            - pixel_error: float.
+    '''
+    pred_np = pred.numpy()
+    label_np = label.numpy()
+
+    iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+    
+    pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
+
+    return iou, pixel_error
+
+
+
+def Pixel_error(pred, label):
+    ''' Computes the pixel error of the network's prediction compared to the labels corresponding to the same image 
+    (squared Euclidean distance).
+        
+    Inputs:
+        - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
+        - labels: labels tensor. Torch tensor of shape [num_patches, H, W]. 
+
+    Outputs:
+        - pixel_error: float.
+    '''
+    pred_np = pred.numpy()
+    label_np = label.numpy()
+
+    pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
+
+    return pixel_error
+
+
+
+def IoU(pred, label):
+    ''' Intersection over Union (IoU) between labels and predictions.
+        Inputs:
+            - pred: prediction tensor. Torch tensor of shape [H, W].
+            - label: labels tensor. Torch tensor of shape [H, W].
+
+        Output:
+            - iou: float.
+    '''
+    pred_np = pred.numpy()
+    label_np = label.numpy()
+
+    iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+
+    return iou
