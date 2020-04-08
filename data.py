@@ -54,6 +54,17 @@ class ImageDataset(Dataset):
             # Mirror border
             image = mirror_transform(image[x:x+388, y:y+388])
             target = mirror_transform(target[x:x+388, y:y+388])
+            # Random rotation
+            rot_id = np.random.randint(4)  # if 0 then original img
+            if rot_id == 1:
+                image = np.rot90(image)
+                target = np.rot90(target)
+            elif rot_id == 2:
+                image = np.rot90(image, axes=(1,0))
+                target = np.rot90(target, axes=(1,0))
+            elif rot_id == 3:
+                image = np.rot90(image, k=2)
+                target = np.rot90(target, k=2)
             # Perform same elastic transformation 
             inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
         else:
