@@ -2,6 +2,8 @@ import cv2 as cv
 import numpy as np
 import torch
 
+# from sklearn.metrics import f1_score
+
 def weighted_map(gt_batch, batch_size):
 
     """ This method is needed to compute the weight map for each ground truth (gt) segmentation, to compensate the different frequency of pixels for each class. 
@@ -137,8 +139,8 @@ def Pixel_error(pred, label):
     Outputs:
         - pixel_error: float.
     '''
-    pred_np  = pred.numpy()
-    label_np = label.numpy()
+    pred_np  = pred.cpu().numpy()
+    label_np = label.cpu().numpy()
 
     pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
 
@@ -155,8 +157,8 @@ def IoU(pred, label):
         Output:
             - iou: float.
     '''
-    pred_np = pred.numpy()
-    label_np = label.numpy()
+    pred_np = pred.cpu().numpy()
+    label_np = label.cpu().numpy()
 
     iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
 

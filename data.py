@@ -18,24 +18,31 @@ from functions import input_size_compute
 
 
 class ImageDataset(Dataset):
-    def __init__(self, root_dir, alpha=3, sigma=10, transform=True):
+    def __init__(self, root_dir, alpha=3, sigma=10, ISBI2012=False):
         self.root_dir = root_dir
-        self.alpha = alpha
-        self.sigma = sigma
+        self.alpha    = alpha
+        self.sigma    = sigma
+        self.image    = []
+        self.target   = []
+        self.ISBI2012 = ISBI2012
 
-        self.image = []
-        self.target = []
-        self.transform = transform
+        if ISBI2012 is True: 
+            n = len(os.listdir(root_dir)) - 2 // 2
+        else:
+            n = len(os.listdir(root_dir)) // 3
 
-        n = len(os.listdir(root_dir)) // 3
         for i in range(1, n+1):
             image_dir = os.path.join(root_dir, f"0{i}")
-            target_dir = os.path.join(os.path.join(root_dir, f"0{i}_ST", "SEG"))
-            target_GT_dir = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
 
-            # Remove files from ST (target_dir) present in GT (target_GT_dir) for training
-            for image in os.listdir(target_GT_dir):
-                os.remove(os.path.join(target_dir, image))
+            if ISBI2012 is True: 
+                target_dir = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
+            else:
+                target_dir    = os.path.join(os.path.join(root_dir, f"0{i}_ST", "SEG"))
+                target_GT_dir = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
+
+                # Remove files from ST (target_dir) present in GT (target_GT_dir) for training
+                for image in os.listdir(target_GT_dir):
+                    os.remove(os.path.join(target_dir, image))
 
             image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_dir)]
             self.image.extend(cv.imread(os.path.join(image_dir, image_name),-1) for image_name in image_names)
@@ -47,21 +54,22 @@ class ImageDataset(Dataset):
                 self.target.append(gt_bin)
 
             # Add files from GT back to ST
-            for image in os.listdir(target_GT_dir):
-                shutil.copyfile(os.path.join(target_GT_dir, image), os.path.join(target_dir, image))
+            if ISBI2012 is False:
+                for image in os.listdir(target_GT_dir):
+                    shutil.copyfile(os.path.join(target_GT_dir, image), os.path.join(target_dir, image))
 
     def __len__(self):
         return len(self.image)
 
     def __getitem__(self, idx):
         # Get images
-        image = self.image[idx]
-        target = self.target[idx]
+        image  = np.asarray(self.image[idx])
+        target = np.asarray(self.target[idx])
 
         original_size = image.shape[-1]
 
         # Generates image such that network's output size is >= label size
-        image = mirror_transform(image)
+        image  = mirror_transform(image)
         target = mirror_transform(target)
 
         input_size = image.shape[-1]
@@ -94,34 +102,40 @@ class ImageDataset(Dataset):
 
 
 class ImageDataset_test(Dataset):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, ISBI2012=False):
         self.root_dir = root_dir
+        self.image    = []
+        self.target   = []
+        self.ISBI2012 = ISBI2012
 
-        self.image = []
-        self.target = []
+        if ISBI2012 is True:
+            n = len(os.listdir(root_dir)) - 2 // 2
+        else:
+            n = len(os.listdir(root_dir)) // 3
 
-        n = len(os.listdir(root_dir)) // 3
         for i in range(1, n+1):
-            image_folder = os.path.join(root_dir, f"0{i}")
-            target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
+            image_dir = os.path.join(root_dir, f"0{i}")
+            target_dir = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
 
-            image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
-            self.image.extend(cv.imread(os.path.join(image_folder, image_name),-1) for image_name in image_names)
+            image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_dir)]
+            self.image.extend(cv.imread(os.path.join(image_dir, image_name),-1) for image_name in image_names)
 
-            for filename in os.listdir(target_folder):
-                img = cv.imread(os.path.join(target_folder, filename), -1)
+            for filename in os.listdir(target_dir):
+                img = cv.imread(os.path.join(target_dir, filename), -1)
                 gt, _ = preprocess_gt(img)
                 _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
-                self.target.append(gt_bin) 
+                self.target.append(gt_bin)
 
     def __len__(self):
         return len(self.image)
 
     def __getitem__(self, idx):
-        inp = self.image[idx]
-        gt = self.target[idx]
+        # Get images
+        image = np.asarray(self.image[idx])
+        gt    = np.asarray(self.target[idx])
 
-        inp = mirror_transform(inp)
+        # Apply mirror transform to input image only
+        inp = mirror_transform(image)
         
         _, gt = cv.threshold(gt, 127, 255, cv.THRESH_BINARY)
         gt = gt / 255  # normalize to [0 1]
@@ -198,7 +212,10 @@ def mirror_transform(image):
     '''
     _, input_size, _ = input_size_compute(image)
 
-    n = len(image)
+    n = image.shape[-1]
+
+    image = image.reshape([n, n])
+
     pad = (input_size - n) // 2
     new_image = np.zeros((input_size, input_size))
     new_image[pad:pad+n,    pad:pad+n] = image
@@ -228,7 +245,11 @@ def mirror_transform_tensor(image):
     _, input_size, _ = input_size_compute(image)
 
     image = image.reshape([image.shape[-1], image.shape[-1]]).numpy()
-    n = len(image)
+
+    n = image.shape[-1]
+
+    image = image.reshape([n, n])
+
     pad = (input_size - n) // 2
     new_image = np.zeros((input_size, input_size))
     new_image[pad:pad+n,    pad:pad+n] = image

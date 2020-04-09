@@ -29,6 +29,8 @@ Arguments:
     - FOLDS: number of folds for the cross validation. Integer number. Not 
              required, but not inputing it in TRAINING mode means training
              with the whole dataset.
+    - NETWORK: path to the model that we want to test in TESTING mode. 
+               it assumes that you are in CUR_DIR. Required in TESTING mode.
 
 '''
 
@@ -43,6 +45,7 @@ from torch.utils.data import DataLoader
 from data import download_all_data, ImageDataset, ImageDataset_test
 from network import Unet
 from trainer import training, training_all
+from tester import testing
 
 ##############################
 
@@ -60,11 +63,24 @@ parser.add_argument('-f', '--folds', type=int, help='number of folds for the cro
                                                     'If we do not input FOLDS, we will train with '
                                                     'the whole training set.', required=False)
 
+parser.add_argument('-n', '--network', type=str, help='path to the model that we want to use for '
+                                                      'TESTING.', required=False)
+
 args = parser.parse_args()
 
 MODE    = args.mode
 DATASET = args.dataset
 FOLDS   = args.folds
+NETWORK = args.network
+
+print(' '                                                                                           )
+print('Reproduced U-net (Ronneberger et al. 2015), by Canals, P., Monguzzi, A., & Sirons, N. (2020)')
+print(' '                                                                                           )
+print('------------------------------'                                                              )
+print(' '                                                                                           )
+print('Mode:   ', MODE                                                                              )
+print('Dataset:', DATASET                                                                           )
+print(' '                                                                                           )
 
 ##############################
 
@@ -75,37 +91,52 @@ root_dir = os.path.join(CUR_DIR, 'data', f'{DATASET}-training')
 
 ##############################
 
-# Download data
+# Download data (if it has not been downoalded already)
 download_all_data()
 
 ##############################
 
 # Parameters:
 if FOLDS is None: # Train with the full training set
+    print('Training with all available training data')
     val_per = 0.0
 elif FOLDS > 5:
-    print('Number of folds is bigger than 5')
+    raise ValueError('Input a FOLDS value below 5')
 else:
+    print('Folds (cross validation):', FOLDS)
     val_per = 0.2
+    print('Training:validation = {}:{}'.format(int(100*(1-val_per)), int(100*val_per)))
 
 tr_per  = 1.0 - val_per
-batch_size = 10
+batch_size = 2
+
+##############################
+
+# Special treatment of training data in the case of the ISBI2012 dataset
+if DATASET is 'ISBI2012': ISBI2012 = True
+else: ISBI2012 = False
 
 ##############################
 
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
+    print(' ')
     print('Running on the GPU')
+    print(' ')
 
 else:
     device = torch.device('cpu')
+    print(' ')
     print('Running on the CPU')
+    print(' ')
 
 ##############################
 
 if MODE == 'TRAINING':
     # Init dataset
-    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10)   # For training + validation
+    print('Initializing dataset...')
+    print(' ')
+    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10, ISBI2012=ISBI2012)   # For training + validation
 
     # Determine number of samples in training and validation
     samp_tr  = int(np.round(tr_per  * len(train_dataset)))
@@ -119,29 +150,40 @@ if MODE == 'TRAINING':
     np.random.shuffle(order)
     
     if FOLDS is None: # Training with all available samples
+        # Make directory where we save model and data
         all_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', 'all')
-        maybe_mkdir_p(fold_dir)
+        maybe_mkdir_p(all_dir)
 
         # Suffle and load the training set
-        train_loader = DataLoader(train_set, batch_size=batch_size , shuffle=True, num_workers=1) # num_workers?
+        train_loader = DataLoader(train_dataset, batch_size=batch_size , shuffle=True, num_workers=1) # num_workers?
 
         torch.cuda.empty_cache()
         unet = Unet().to(device)
+
+        print('Number of images used for training:', len(train_loader))
+        print('                                                      ')
+        print('Starting training'                                     )
+        print('                                                      ')
 
         training_all(unet, train_loader, epochs=5000, batch_size=batch_size, device=device, all_dir=all_dir)
 
     else:
         for fold in range(FOLDS): # Cross validation
+            print('Starting training: fold', fold)
             # Make directory where we save model and data for each fold
             fold_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', f'fold{fold}')
             maybe_mkdir_p(fold_dir)
 
             # Order the training set (first time shuffles, the rest is determined by the shift in order below)
-            train_dataset = [train_dataset[i] for i in order]
+            train_dataset = [train_dataset[idx] for idx in order]
 
             # Divide full train_dataset between training and validation
             train_set   = train_dataset[0: samp_tr]
             val_set     = train_dataset[samp_tr: -1]
+
+            # If testing on CPU use these:
+            # train_set   = train_dataset[0: 2]
+            # val_set     = train_dataset[2: 3]
 
             train_loader = DataLoader(train_set, batch_size=batch_size , shuffle=True, num_workers=1) # num_workers?
             val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=True)
@@ -150,23 +192,39 @@ if MODE == 'TRAINING':
             order = np.append(order[samp_val:], order[0:samp_val])
                 
             torch.cuda.empty_cache()
-            unet = Unet().to(device)    
+            unet = Unet().to(device)  
 
-            training(unet, train_loader, val_loader, epochs=5000, batch_size=batch_size, device=device, fold_dir=fold_dir)
+            print('Number of images used for training  :', len(train_loader))
+            print('Number of images used for validation:', len(val_loader)  )  
+            print('                                                        ')
+            print('Starting training'                                       )
+            print('                                                        ')
 
-elif MODE == 'TESTING': # Still green, check trainer for inspiration
-    model_path = 'unet_weight_save_5000.pth'
+            training(unet, train_loader, val_loader, epochs=5000, batch_size=batch_size, device=device, fold_dir=fold_dir, dataset=DATASET)
 
-    test_dataset  = ImageDataset_test(root_dir)                   
-    test_loader   = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+elif MODE == 'TESTING': 
+    # Get model path to test
+    if NETWORK is not None:
+        model_path = os.path.join(CUR_DIR, NETWORK)
+    else:
+        raise ValueError('Input a network path when calling the script')
 
-    fold_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', f'fold{fold}')
-    maybe_mkdir_p(os.path.join(root_dir))
+    # Get test data
+    test_dataset = ImageDataset_test(root_dir, ISBI2012=ISBI2012)   
+    test_dataset = [test_dataset[idx] for idx in range(len(test_dataset))]               
+    test_loader  = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    if 'output' not in os.listdir(os.path.join(CUR_DIR, 'data')):
-        os.mkdir(os.path.join(CUR_DIR, 'data', 'output'))
+    # Make directory for test outputs (assumes .pth format)
+    output_dir = os.path.join(model_path[0:len(model_path)-4], '_test')
+    maybe_mkdir_p(output_dir)
 
+    torch.cuda.empty_cache()
+    unet = Unet().to(device)
     unet.load_state_dict(torch.load(model_path))
 
-    for i, batch in enumerate(test_loader):
+    print('Number of images used for testing:', len(test_loader))
+    print('                                                    ')
+    print('Starting testing'                                    )
+    print('                                                    ')
 
+    testing(unet, test_loader, batch_size=1, device=device, output_dir=output_dir)
