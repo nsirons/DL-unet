@@ -70,12 +70,14 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
 
             total_loss += loss
 
+            preds = preds.argmax(dim=1)
+
             for idx in range(preds.shape[0]):
                 if start_eval_train == 0 and idx == 0: # First time in epoch we initialize train_eval
-                    train_eval = evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())
+                    train_eval = evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())
                     start_eval_train += 1
                 else:
-                    np.concatenate((train_eval, evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
+                    np.concatenate((train_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
         scheduler.step(total_loss / len(train_loader)) # update the lr
 
@@ -88,14 +90,14 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             preds = unet(images.to(device))
 
             pad = int((preds.shape[-1] - labels.shape[-1]) / 2)
-            preds = preds[:, :, pad:labels.shape[-1]+pad, pad:labels.shape[-1]+pad]
+            preds = preds[:, :, pad:labels.shape[-1]+pad, pad:labels.shape[-1]+pad].argmax(dim=1)
 
             for idx in range(preds.shape[0]):
                 if start_eval_val == 0 and idx == 0: # First time in epoch we initialize val_eval
-                    val_eval = evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())
+                    val_eval = evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())
                     start_eval_val += 1
                 else:
-                    np.concatenate((val_eval, evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
+                    np.concatenate((val_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
         val_eval_epoch = np.mean(val_eval, axis=1)
 
@@ -220,12 +222,14 @@ def training_all(unet, train_loader, epochs, batch_size, device, all_dir):
 
             total_loss += loss
 
+            preds = preds.argmax(dim=1)
+
             for idx in range(preds.shape[0]):
                 if start_eval_train == 0 and idx == 0: # First time in epoch we initialize train_eval
-                    train_eval = evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())
+                    train_eval = evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())
                     start_eval_train += 1
                 else:
-                    np.concatenate((train_eval, evaluation_metrics(preds[idx, 1, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
+                    np.concatenate((train_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
         scheduler.step(total_loss / len(train_loader)) # update the lr
 

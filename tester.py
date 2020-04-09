@@ -27,17 +27,17 @@ def testing(unet, test_loader, batch_size, device, output_dir):
         pred = unet(image.to(device))
 
         pad = int((pred.shape[-1] - label.shape[-1]) / 2)
-        pred = pred[:, :, pad:label.shape[-1]+pad, pad:label.shape[-1]+pad]
+        pred = pred[:, :, pad:label.shape[-1]+pad, pad:label.shape[-1]+pad].argmax(dim=1)
 
-        save_image(image[0, 0, :, :], os.path.join(output_dir, 'images', f'image{idx}.tif'))
-        save_image(label[0, 0, :, :], os.path.join(output_dir, 'preds',  f'pred{idx}.tif' ))
-        save_image(pred[0, 1, :, :],  os.path.join(output_dir, 'labels', f'label{idx}.tif'))
+        save_image(image[0, 0, :, :]     , os.path.join(output_dir, 'images', f'image{idx}.tif'))
+        save_image(label[0, 0, :, :].float(), os.path.join(output_dir, 'preds',  f'pred{idx}.tif' ))
+        save_image(pred[0, :, :].float() , os.path.join(output_dir, 'labels', f'label{idx}.tif'))
 
         if start_eval_test == 0: 
-            test_eval = evaluation_metrics(pred[0, 1, :, :].detach(), label[0, 0, :, :].detach())
+            test_eval = evaluation_metrics(pred[0, :, :].detach(), label[0, 0, :, :].detach())
             start_eval_test += 1
         else:
-            np.concatenate((test_eval, evaluation_metrics(pred[0, 1, :, :].detach(), label[0, 0, :, :].detach())), axis=1)
+            np.concatenate((test_eval, evaluation_metrics(pred[0, :, :].detach(), label[0, 0, :, :].detach())), axis=1)
 
     test = np.mean(test_eval, axis=1)
 
