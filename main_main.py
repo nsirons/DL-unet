@@ -1,3 +1,37 @@
+''' Main script 
+
+We use this script to perform training and/or testing for the Unet
+described in Ronneberger et al. (2015)[1].
+
+This project is framed in the reproducibility assignement from the 
+Deep Learning course (CS4240) at TU Delft (Spring 2020).
+
+Authors (alph): Canals, P., Monguzzi, A., & Sirons, N.
+
+GitHub: https://github.com/nsirons/DL-unet
+
+[1] Ronneberger, O., Fischer, P., & Brox, T. (2015). U-net: Convolutional 
+networks for biomedical image segmentation. Lecture Notes in Computer Science 
+(Including Subseries Lecture Notes in Artificial Intelligence and Lecture 
+Notes in Bioinformatics), 9351, 234–241. https://doi.org/10.1007/978-3-319-24574-4_28
+
+------------------------------
+
+To run the code, you should be in the same dir as the script and run the following 
+line in the terminal command line:
+
+>> python3 main_main.py -m MODE -d DATASET -f FOLDS
+
+Arguments:
+    - MODE: either 'TRAINING' or 'TESTING'. Required.
+    - DATASET: you can choose either of the three datasets present in [1], i.e, 
+               'DIC-C2DH-HeLa', 'ISBI2012' or 'PhC-C2DH-U373'. Required.
+    - FOLDS: number of folds for the cross validation. Integer number. Not 
+             required, but not inputing it in TRAINING mode means training
+             with the whole dataset.
+
+'''
+
 import numpy as np
 import os
 from batchgenerators.utilities.file_and_folder_operations import maybe_mkdir_p
@@ -5,8 +39,6 @@ import argparse
 
 import torch
 from torch.utils.data import DataLoader
-
-# from sklearn.metrics import f1_score
 
 from data import download_all_data, ImageDataset, ImageDataset_test
 from network import Unet
@@ -122,11 +154,11 @@ if MODE == 'TRAINING':
 
             training(unet, train_loader, val_loader, epochs=5000, batch_size=batch_size, device=device, fold_dir=fold_dir)
 
-elif MODE == 'TESTING': 
+elif MODE == 'TESTING': # Still green, check trainer for inspiration
     model_path = 'unet_weight_save_5000.pth'
 
     test_dataset  = ImageDataset_test(root_dir)                   
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader   = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     fold_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', f'fold{fold}')
     maybe_mkdir_p(os.path.join(root_dir))
@@ -135,8 +167,6 @@ elif MODE == 'TESTING':
         os.mkdir(os.path.join(CUR_DIR, 'data', 'output'))
 
     unet.load_state_dict(torch.load(model_path))
-
-    pixel_error = 0
 
     for i, batch in enumerate(test_loader):
 
