@@ -2,17 +2,19 @@ import os
 import wget
 import zipfile
 import cv2 as cv
+import shutil
 
 from PIL import Image
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
-from scipy import interpolate
 
 import torch
 import torchvision
 from torchvision import transforms, utils
 from torch.utils.data import Dataset
+
+from functions import input_size_compute
 
 
 class ImageDataset(Dataset):
@@ -27,49 +29,104 @@ class ImageDataset(Dataset):
 
         n = len(os.listdir(root_dir)) // 3
         for i in range(1, n+1):
-            image_folder = os.path.join(root_dir, f"0{i}")
-            target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
-            image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
-            self.image.extend(cv.imread(os.path.join(image_folder, image_name),-1) for image_name in image_names)
-            for filename in os.listdir(target_folder):
-                img = cv.imread(os.path.join(target_folder, filename), -1)
+            image_dir = os.path.join(root_dir, f"0{i}")
+            target_dir = os.path.join(os.path.join(root_dir, f"0{i}_ST", "SEG"))
+            target_GT_dir = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
+
+            # Remove files from ST (target_dir) present in GT (target_GT_dir) for training
+            for image in os.listdir(target_GT_dir):
+                os.remove(os.path.join(target_dir, image))
+
+            image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_dir)]
+            self.image.extend(cv.imread(os.path.join(image_dir, image_name),-1) for image_name in image_names)
+
+            for filename in os.listdir(target_dir):
+                img = cv.imread(os.path.join(target_dir, filename), -1)
                 gt, _ = preprocess_gt(img)
                 _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
                 self.target.append(gt_bin)
 
+            # Add files from GT back to ST
+            for image in os.listdir(target_GT_dir):
+                shutil.copyfile(os.path.join(target_GT_dir, image), os.path.join(target_dir, image))
 
     def __len__(self):
-        if self.transform:
-            return len(self.image)
-        return 4*len(self.image)  # hardcoded
+        return len(self.image)
 
     def __getitem__(self, idx):
-        if self.transform:
-            # Get images
-            image = self.image[idx]
-            target = self.target[idx]
-            # Random crop
-            x = np.random.randint(0, 512-388)
-            y = np.random.randint(0, 512-388)
-            # Mirror border
-            image = mirror_transform(image[x:x+388, y:y+388])
-            target = mirror_transform(target[x:x+388, y:y+388])
-            # Perform same elastic transformation 
-            inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
-        else:
-            # TODO: hardcoded // 512 -> input image size from dataset; 388 -> network's output map
-            image_size = self.image[idx].shape[-1]
-            target_size = self.target[idx].shape[-1]
-            i = idx // 4
-            x = (image_size-target_size)*(idx % 2)
-            y = (image_size-target_size)*((idx - 4 * i) // 2)
-            inp = mirror_transform(self.image[i][x:x+target_size, y:y+target_size])
-            gt = mirror_transform(self.target[i][x:x+target_size, y:y+target_size])
+        # Get images
+        image = self.image[idx]
+        target = self.target[idx]
+
+        original_size = image.shape[-1]
+
+        # Generates image such that network's output size is >= label size
+        image = mirror_transform(image)
+        target = mirror_transform(target)
+
+        input_size = image.shape[-1]
+
+        # Random rotation
+        rot_id = np.random.randint(4)  # if 0 then original img
+        if rot_id == 1:
+            image = np.rot90(image)
+            target = np.rot90(target)
+        elif rot_id == 2:
+            image = np.rot90(image, axes=(1,0))
+            target = np.rot90(target, axes=(1,0))
+        elif rot_id == 3:
+            image = np.rot90(image, k=2)
+            target = np.rot90(target, k=2)
+
+        # Perform same elastic transformation 
+        inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
+
+        pad = int((input_size - original_size) / 2)
         
-        gt = gt[92:388+92, 92:388+92]  # crop gt
+        gt = gt[pad:original_size+pad, pad:original_size+pad]  # crop gt
         _, gt = cv.threshold(gt, 127, 255, cv.THRESH_BINARY)
         gt = gt / 255  # normalize to [0 1]
         inp = (inp - np.min(inp))/np.ptp(inp)  # normalize to [0 1]
+        
+        return transforms.ToTensor()(inp.astype('float32')), \
+               transforms.ToTensor()(gt).long()
+
+
+
+class ImageDataset_test(Dataset):
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
+
+        self.image = []
+        self.target = []
+
+        n = len(os.listdir(root_dir)) // 3
+        for i in range(1, n+1):
+            image_folder = os.path.join(root_dir, f"0{i}")
+            target_folder = os.path.join(os.path.join(root_dir, f"0{i}_GT", "SEG"))
+
+            image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_folder)]
+            self.image.extend(cv.imread(os.path.join(image_folder, image_name),-1) for image_name in image_names)
+
+            for filename in os.listdir(target_folder):
+                img = cv.imread(os.path.join(target_folder, filename), -1)
+                gt, _ = preprocess_gt(img)
+                _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
+                self.target.append(gt_bin) 
+
+    def __len__(self):
+        return len(self.image)
+
+    def __getitem__(self, idx):
+        inp = self.image[idx]
+        gt = self.target[idx]
+
+        inp = mirror_transform(inp)
+        
+        _, gt = cv.threshold(gt, 127, 255, cv.THRESH_BINARY)
+        gt = gt / 255  # normalize to [0 1]
+        inp = (inp - np.min(inp))/np.ptp(inp)  # normalize to [0 1]
+
         return transforms.ToTensor()(inp.astype('float32')), \
                transforms.ToTensor()(gt).long()
 
@@ -130,17 +187,18 @@ def elastic_transform(images, alpha, sigma, random_state=None):
 
 
 def mirror_transform(image):
-    ''' Fills the difference in size between the original image or patch to a fixed input size (572) of the newtork 
-        mirroring the original image outwards.
+    ''' Fills the difference in size between the original image or patch to the input_size of the newtork mirroring            the original image outwards.
+        We shall use this on the test dataset only.
         
         Inputs:
-            - image: original image from the dataset. Numpy array of shape [input_size, input_size].
+            - image: original image from the dataset. Numpy ndarray of shape [original_size, original_size].
 
         Output: 
-            - new_image: mirrored image. Numpy array of shape [input_size, input_size].
+            - new_image: mirrored image. Numpy ndarray of shape [input_size, input_size].
     '''
+    _, input_size, _ = input_size_compute(image)
+
     n = len(image)
-    input_size = 572
     pad = (input_size - n) // 2
     new_image = np.zeros((input_size, input_size))
     new_image[pad:pad+n,    pad:pad+n] = image
@@ -157,17 +215,18 @@ def mirror_transform(image):
     
 
 
-def mirror_transform_test(image, input_size):
+def mirror_transform_tensor(image):
     ''' Fills the difference in size between the original image or patch to the input_size of the newtork mirroring            the original image outwards.
         We shall use this on the test dataset only.
         
         Inputs:
             - image: original image from the dataset. Torch tensor of shape [(1), (1), original_size, original_size].
-            - input_size: input size for the network, precomputed by the functions.input_size_compute method.
 
         Output: 
             - new_image: mirrored image. Torch tensor of shape [1, 1, input_size, input_size].
     '''
+    _, input_size, _ = input_size_compute(image)
+
     image = image.reshape([image.shape[-1], image.shape[-1]]).numpy()
     n = len(image)
     pad = (input_size - n) // 2

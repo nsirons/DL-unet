@@ -105,21 +105,24 @@ def input_size_compute(image):
 def evaluation_metrics(pred, label):
     ''' Intersection over Union (IoU) and pixel error (or squared Euclidean distance) between labels and predictions.
         Inputs:
-            - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
-            - labels: labels tensor. Torch tensor of shape [num_patches, H, W].
+            - preds: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+            - labels: labels tensor. Torch tensor of shape [(batch_size), H, W].
 
         Output:
             - iou: float.
             - pixel_error: float.
     '''
-    pred_np = pred.numpy()
-    label_np = label.numpy()
 
-    iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+    iou = IoU(pred, label)
     
-    pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
+    pixel_error = Pixel_error(pred, label)
 
-    return iou, pixel_error
+    evaluation_metrics = np.empty([2,1])
+
+    evaluation_metrics[0] = iou
+    evaluation_metrics[1] = pixel_error
+
+    return evaluation_metrics
 
 
 
@@ -128,13 +131,13 @@ def Pixel_error(pred, label):
     (squared Euclidean distance).
         
     Inputs:
-        - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
-        - labels: labels tensor. Torch tensor of shape [num_patches, H, W]. 
+        - preds: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+        - labels: labels tensor. Torch tensor of shape [(batch_size), H, W]. 
 
     Outputs:
         - pixel_error: float.
     '''
-    pred_np = pred.numpy()
+    pred_np  = pred.numpy()
     label_np = label.numpy()
 
     pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
@@ -146,8 +149,8 @@ def Pixel_error(pred, label):
 def IoU(pred, label):
     ''' Intersection over Union (IoU) between labels and predictions.
         Inputs:
-            - pred: prediction tensor. Torch tensor of shape [H, W].
-            - label: labels tensor. Torch tensor of shape [H, W].
+            - pred: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+            - label: labels tensor. Torch tensor of shape [(batch_size), H, W].
 
         Output:
             - iou: float.
