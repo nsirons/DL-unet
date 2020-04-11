@@ -2,7 +2,9 @@ import cv2 as cv
 import numpy as np
 import torch
 
-def weighted_map(gt_batch, batch_size):
+# from sklearn.metrics import f1_score
+
+def weighted_map(gt_batch):
 
     """ This method is needed to compute the weight map for each ground truth (gt) segmentation, to compensate the different frequency of pixels for each class. 
         With this method, we highlight the borders between different objects (cells in the case of the HeLa dataset used in Ronneberger et al. 2015) 
@@ -16,6 +18,8 @@ def weighted_map(gt_batch, batch_size):
     """
 
     w_batch = torch.empty_like(gt_batch)
+
+    batch_size = gt_batch.shape[0]
 
     for batch_pos in range(batch_size):
 
@@ -105,21 +109,24 @@ def input_size_compute(image):
 def evaluation_metrics(pred, label):
     ''' Intersection over Union (IoU) and pixel error (or squared Euclidean distance) between labels and predictions.
         Inputs:
-            - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
-            - labels: labels tensor. Torch tensor of shape [num_patches, H, W].
+            - preds: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+            - labels: labels tensor. Torch tensor of shape [(batch_size), H, W].
 
         Output:
             - iou: float.
             - pixel_error: float.
     '''
-    pred_np = pred.numpy()
-    label_np = label.numpy()
 
-    iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+    iou = IoU(pred, label)
     
-    pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
+    pixel_error = Pixel_error(pred, label)
 
-    return iou, pixel_error
+    evaluation_metrics = np.empty([2,1])
+
+    evaluation_metrics[0] = iou
+    evaluation_metrics[1] = pixel_error
+
+    return evaluation_metrics
 
 
 
@@ -128,14 +135,14 @@ def Pixel_error(pred, label):
     (squared Euclidean distance).
         
     Inputs:
-        - preds: prediction tensor. Torch tensor of shape [num_patches, H, W].
-        - labels: labels tensor. Torch tensor of shape [num_patches, H, W]. 
+        - preds: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+        - labels: labels tensor. Torch tensor of shape [(batch_size), H, W]. 
 
     Outputs:
         - pixel_error: float.
     '''
-    pred_np = pred.numpy()
-    label_np = label.numpy()
+    pred_np  = pred.cpu().numpy()
+    label_np = label.cpu().numpy()
 
     pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
 
@@ -146,14 +153,14 @@ def Pixel_error(pred, label):
 def IoU(pred, label):
     ''' Intersection over Union (IoU) between labels and predictions.
         Inputs:
-            - pred: prediction tensor. Torch tensor of shape [H, W].
-            - label: labels tensor. Torch tensor of shape [H, W].
+            - pred: prediction tensor. Torch tensor of shape [(batch_size), H, W].
+            - label: labels tensor. Torch tensor of shape [(batch_size), H, W].
 
         Output:
             - iou: float.
     '''
-    pred_np = pred.numpy()
-    label_np = label.numpy()
+    pred_np = pred.cpu().numpy()
+    label_np = label.cpu().numpy()
 
     iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
 
