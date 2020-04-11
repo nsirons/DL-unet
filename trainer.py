@@ -27,12 +27,14 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
     else:
         when_to_stop = None
 
-    optimizer = optim.SGD(unet.parameters(), lr=0.01, momentum=0.99)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, threshold=1e-3, eps=1e-6)
-    patience = 0
+    optimizer = optim.SGD(unet.parameters(), lr=0.0001, momentum=0.99)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, threshold=1e-2, threshold_mode='rel', eps=1e-7)
+    my_patience = 0
 
     maybe_mkdir_p(os.path.join(fold_dir, 'progress'))
     maybe_mkdir_p(os.path.join(fold_dir, 'models' ))
+
+    loss_best_epoch = 100000.0
 
     for epoch in range(epochs+1):
         
@@ -41,9 +43,11 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
 
         start = time()
         total_loss = 0
-        previous_loss = 0
+        total_loss_val = 0
         start_eval_train = 0
         start_eval_val = 0
+
+        torch.cuda.empty_cache()
 
         for batch in train_loader:
 
@@ -61,7 +65,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             ll[:,1,:,:] = labels[:, 0, :, :] # cell
             ll = ll.to(device)
 
-            weight_maps = weighted_map(labels, batch_size).to(device)
+            weight_maps = weighted_map(labels).to(device)
             criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
             loss = criterion(preds, ll)
 
@@ -79,46 +83,70 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
                 else:
                     np.concatenate((train_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
-        scheduler.step(total_loss / len(train_loader)) # update the lr
-
         train_eval_epoch = np.mean(train_eval, axis=1)
 
-        for batch in val_loader:
-            
-            images, labels = batch
+        torch.cuda.empty_cache()
 
-            preds = unet(images.to(device))
+        with torch.no_grad():
 
-            pad = int((preds.shape[-1] - labels.shape[-1]) / 2)
-            preds = preds[:, :, pad:labels.shape[-1]+pad, pad:labels.shape[-1]+pad].argmax(dim=1)
+            for batch in val_loader:
+                
+                images, labels = batch
 
-            for idx in range(preds.shape[0]):
-                if start_eval_val == 0 and idx == 0: # First time in epoch we initialize val_eval
-                    val_eval = evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())
-                    start_eval_val += 1
-                else:
-                    np.concatenate((val_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
+                preds = unet(images.to(device))
+
+                pad = int((preds.shape[-1] - labels.shape[-1]) / 2)
+                preds = preds[:, :, pad:labels.shape[-1]+pad, pad:labels.shape[-1]+pad]
+                
+                ll = torch.empty_like(preds)
+                ll[:,0,:,:] = 1 - labels[:, 0, :, :] # background
+                ll[:,1,:,:] = labels[:, 0, :, :] # cell
+                ll = ll.to(device)
+
+                weight_maps = weighted_map(labels).to(device)
+                criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+                loss = criterion(preds, ll)
+
+                total_loss_val += loss
+
+                preds = preds.argmax(1)
+
+                for idx in range(preds.shape[0]):
+                    if start_eval_val == 0 and idx == 0: # First time in epoch we initialize val_eval
+                        val_eval = evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())
+                        start_eval_val += 1
+                    else:
+                        np.concatenate((val_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
         val_eval_epoch = np.mean(val_eval, axis=1)
 
+        scheduler.step(total_loss_val / (len(val_loader) * batch_size)) # update the lr
+
         for param_group in optimizer.param_groups: l_rate = param_group['lr']
 
-        loss_epoch = total_loss / len(train_loader)
-        loss_diff = abs(previous_loss - loss_epoch)
-        if loss_diff < 1e-3: patience += 1
-        previous_loss = loss_epoch
+        loss_epoch     = total_loss / (len(train_loader) * batch_size)
+        loss_epoch_val = total_loss_val / (len(val_loader) * batch_size)
 
-        print('Current lr is:        ', l_rate                              )
-        print('Patience is:           {}/10'.format(patience)               )
-        print('Mean IoU training:    ', "{:.6f}".format(train_eval_epoch[0]))
-        print('Mean PE training:     ', "{:.6f}".format(train_eval_epoch[1]))
-        print('Mean IoU validation:  ', "{:.6f}".format(val_eval_epoch[0])  )
-        print('Mean PE validation:   ', "{:.6f}".format(val_eval_epoch[1])  )
-        print('Total training loss:  ', "{:.6f}".format(loss_epoch.item())  )
-        print('Epoch duration:       ', "{:.6f}".format(time()-start), 's'  )
-        print(' ')
+        if loss_epoch_val < (loss_best_epoch * (1.0 - scheduler.threshold)):
+            loss_best_epoch = loss_epoch_val
+            print('New best epoch!')
+            my_patience = 0
+            PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_best.pth')
+            torch.save(unet.state_dict(), PATH)
+        else:
+            my_patience += 1
 
-        if patience == 10: patience = 0
+        print('Current lr is:             ', l_rate                                      )
+        print('Patience is:                {}/{}'.format(my_patience, scheduler.patience))
+        print('Mean IoU training:         ', "{:.6f}".format(train_eval_epoch[0])        )
+        print('Mean PE training:          ', "{:.6f}".format(train_eval_epoch[1])        )
+        print('Mean IoU validation:       ', "{:.6f}".format(val_eval_epoch[0])          )
+        print('Mean PE validation:        ', "{:.6f}".format(val_eval_epoch[1])          )
+        print('Total training loss:       ', "{:.6f}".format(loss_epoch.item())          )
+        print('Total validation loss:     ', "{:.6f}".format(loss_epoch_val.item())      )
+        print('Best epoch validation loss:', "{:.6f}".format(loss_best_epoch.item())     )
+        print('Epoch duration:            ', "{:.6f}".format(time()-start), 's'          )
+        print('                                                                         ')
 
         # Save progress (evaluation metrics and loss)
         if epoch == 0:
@@ -127,53 +155,66 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             val_eval_progress_iou   = [val_eval_epoch[0]]
             val_eval_progress_pe    = [val_eval_epoch[1]]
             loss_progress           = [loss_epoch.item()]
+            loss_progress_val       = [loss_epoch_val.item()]
         elif epoch > 0:
             train_eval_progress_iou = np.concatenate((train_eval_progress_iou, [train_eval_epoch[0]]))
             train_eval_progress_pe  = np.concatenate((train_eval_progress_pe, [train_eval_epoch[1]]) )
             val_eval_progress_iou   = np.concatenate((val_eval_progress_iou, [val_eval_epoch[0]])    )
             val_eval_progress_pe    = np.concatenate((val_eval_progress_pe, [val_eval_epoch[1]])     )
-            loss_progress           = np.append(loss_progress, [loss_epoch.item()])
+            loss_progress           = np.append(loss_progress, [loss_epoch.item()]                   )
+            loss_progress_val       = np.append(loss_progress_val, [loss_epoch_val.item()]           )
 
         np.savetxt(os.path.join(fold_dir, 'progress', 'train_eval_iou.out'), train_eval_progress_iou)
         np.savetxt(os.path.join(fold_dir, 'progress', 'train_eval_pe.out' ), train_eval_progress_pe )
         np.savetxt(os.path.join(fold_dir, 'progress', 'val_eval_iou.out'  ), val_eval_progress_iou  )
         np.savetxt(os.path.join(fold_dir, 'progress', 'val_eval_pe.out'   ), val_eval_progress_pe   )
         np.savetxt(os.path.join(fold_dir, 'progress', 'loss.out'          ), loss_progress          )
+        np.savetxt(os.path.join(fold_dir, 'progress', 'loss_val.out'      ), loss_progress_val      )
 
         if when_to_stop == 0:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
-                print('     ', PATH)
-                break
+                print(PATH)
+                # break
+                when_to_stop = None
             continue
         elif when_to_stop == 1:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
-                print('     ', PATH)
-                break
+                print(PATH)
+                # break
+                when_to_stop = None
             continue
         elif when_to_stop == 2:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
-                print('     ', PATH)
-                break
+                print(PATH)
+                # break
+                when_to_stop = None
             continue
 
-        # Save model every 500 epochs
-        if epoch % 500 == 0:
-            PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(epoch))
+        # Save model every 50 epochs
+        if epoch % 25 == 0:
+            PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_latest.pth')
             torch.save(unet.state_dict(), PATH)
             print('Model has been saved:')
-            print('     ', PATH)
+            print(PATH)
+
+        if l_rate < scheduler.eps and my_patience == scheduler.patience:
+            print('LR dropped below 1e-6!')
+            print('Stopping training')
+            break
+
+        if my_patience == scheduler.patience: my_patience = 0
 
     print('Training is finished as epoch {} has been reached'.format(epochs))
 
@@ -181,9 +222,11 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
 
 def training_all(unet, train_loader, epochs, batch_size, device, all_dir):
 
-    optimizer = optim.SGD(unet.parameters(), lr=0.01, momentum=0.99)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, threshold=1e-3, eps=1e-6)
-    patience = 0
+    optimizer = optim.SGD(unet.parameters(), lr=0.001, momentum=0.99)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, threshold=1e-2, threshold_mode='rel', eps=1e-7)
+    my_patience = 0
+
+    loss_best_epoch = 100000.0
 
     for epoch in range(epochs+1):
         
@@ -192,7 +235,6 @@ def training_all(unet, train_loader, epochs, batch_size, device, all_dir):
 
         start = time()
         total_loss = 0
-        previous_loss = 0
         start_eval_train = 0
 
         maybe_mkdir_p(os.path.join(all_dir, 'progress'))
@@ -231,26 +273,29 @@ def training_all(unet, train_loader, epochs, batch_size, device, all_dir):
                 else:
                     np.concatenate((train_eval, evaluation_metrics(preds[idx, :, :].detach(), labels[idx, 0, :, :].detach())), axis=1)
 
-        scheduler.step(total_loss / len(train_loader)) # update the lr
+        scheduler.step(total_loss / (len(train_loader) * batch_size)) # update the lr
 
         train_eval_epoch = np.mean(train_eval, axis=1)
 
         for param_group in optimizer.param_groups: l_rate = param_group['lr']
 
         loss_epoch = total_loss / len(train_loader)
-        loss_diff = abs(previous_loss - loss_epoch)
-        if loss_diff < 1e-3: patience += 1
-        previous_loss = loss_epoch
 
-        print('Current lr is:        ', l_rate                              )
-        print('Patience is:           {}/10'.format(patience)               )
-        print('Mean IoU training:    ', "{:.6f}".format(train_eval_epoch[0]))
-        print('Mean PE training:     ', "{:.6f}".format(train_eval_epoch[1]))
-        print('Total training loss:  ', "{:.6f}".format(loss_epoch.item())  )
-        print('Epoch duration:       ', "{:.6f}".format(time()-start), 's'  )
-        print(' ')
+        if loss_epoch < (loss_best_epoch * (1.0 - scheduler.threshold)):
+            loss_best_epoch = loss_epoch
+            print('New best epoch!')
+            my_patience = 0
+        else:
+            my_patience += 1
 
-        if patience == 10: patience = 0
+        print('Current lr is:           ', l_rate                                      )
+        print('Patience is:              {}/{}'.format(my_patience, scheduler.patience))
+        print('Mean IoU training:       ', "{:.6f}".format(train_eval_epoch[0])        )
+        print('Mean PE training:        ', "{:.6f}".format(train_eval_epoch[1])        )
+        print('Total training loss:     ', "{:.6f}".format(loss_epoch.item())          )
+        print('Best epoch training loss:', "{:.6f}".format(loss_best_epoch.item())     )
+        print('Epoch duration:          ', "{:.6f}".format(time()-start), 's'          )
+        print('                                                                       ')
 
         # Save progress (evaluation metrics and loss)
         if epoch == 0:
@@ -267,29 +312,17 @@ def training_all(unet, train_loader, epochs, batch_size, device, all_dir):
         np.savetxt(os.path.join(all_dir, 'progress', 'loss.out'          ), loss_progress          )
     
         # Save model every 500 epochs
-        if epoch % 500 == 0:
-            PATH = os.path.join(all_dir, 'models', 'unet_weight_save_{}.pth'.format(epoch))
+        if epoch % 25 == 0:
+            PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_latest.pth')
             torch.save(unet.state_dict(), PATH)
             print('Model has been saved:')
-            print('     ', PATH)
+            print(PATH)
+
+        if l_rate < scheduler.eps and my_patience == scheduler.patience:
+            print('LR dropped below 1e-6!')
+            print('Stopping training')
+            break
+
+        if my_patience == scheduler.patience: my_patience = 0
 
     print('Training is finished as epoch {} has been reached'.format(epochs))
-
-
-            
-def custom_loss(pred, label, weights):
-    batch_size, c, h, w = pred.shape
-    logp = -F.log_softmax(pred)  # added - sign
-
-    # Gather log probabilities with respect to target
-    logp = logp.gather(1, label.view(batch_size, c, h, w))
-
-    # Multiply with weights
-    weighted_logp = (logp * weights).view(batch_size, -1)
-
-    # Rescale so that loss is in approx. same interval
-    weighted_loss = weighted_logp.sum(1) / weights.view(batch_size, -1).sum(1)
-    
-    # Average over mini-batch
-    weighted_loss = weighted_loss.mean()
-    return weighted_loss

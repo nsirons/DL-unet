@@ -40,6 +40,7 @@ def testing(unet, test_loader, batch_size, device, output_dir):
             np.concatenate((test_eval, evaluation_metrics(pred[0, :, :].detach(), label[0, 0, :, :].detach())), axis=1)
 
     test = np.mean(test_eval, axis=1)
+    # std
 
     test_iou = [test[0]]
     test_pe  = [test[1]]

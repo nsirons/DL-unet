@@ -4,7 +4,7 @@ import torch
 
 # from sklearn.metrics import f1_score
 
-def weighted_map(gt_batch, batch_size):
+def weighted_map(gt_batch):
 
     """ This method is needed to compute the weight map for each ground truth (gt) segmentation, to compensate the different frequency of pixels for each class. 
         With this method, we highlight the borders between different objects (cells in the case of the HeLa dataset used in Ronneberger et al. 2015) 
@@ -18,6 +18,8 @@ def weighted_map(gt_batch, batch_size):
     """
 
     w_batch = torch.empty_like(gt_batch)
+
+    batch_size = gt_batch.shape[0]
 
     for batch_pos in range(batch_size):
 
