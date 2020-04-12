@@ -35,6 +35,8 @@ Arguments:
             Not required.
     - START_FROM: in case one wants to continue training from last model saved, 
                   input an int =~ 0 (cross validation) and input -1 for training_all.
+    - SKIP_FOLD: if we want to skip any folds from the same random seed, we shall
+                 use this argument. See help for example. Not required.
 
 '''
 
@@ -48,7 +50,7 @@ from torch.utils.data import DataLoader
 
 from data import download_all_data, ImageDataset, ImageDataset_test
 from network import Unet
-from trainer import training, training_all
+from trainer import training
 from tester import testing
 
 ##############################
@@ -77,14 +79,19 @@ parser.add_argument('-sf', '--start_from', type=int, help='continue training fro
                                                           'Options: ::-1::, - continue training full model. '
                                                           'Options: ::N::, - start from Nth fold.', required=False)
 
+parser.add_argument('-sk', '--skip_fold', type=int, help='it skips folds below number specified. '
+                                                         'E.g. if --skip_fold is set to ::1::, it will '
+                                                         'skip the first fold (fold 0). Not required.', required=False)
+
 args = parser.parse_args()
 
-MODE    = args.mode
-DATASET = args.dataset
-FOLDS   = args.folds
-NETWORK = args.network
-SEED    = args.seed
+MODE       = args.mode
+DATASET    = args.dataset
+FOLDS      = args.folds
+NETWORK    = args.network
+SEED       = args.seed
 START_FROM = args.start_from
+SKIP_FOLD  = args.skip_fold
 
 print(' '                                                                                           )
 print('Reproduced U-net (Ronneberger et al. 2015), by Canals, P., Monguzzi, A., & Sirons, N. (2020)')
@@ -122,6 +129,8 @@ else:
 
 if SEED is None: SEED = 0
 
+if SKIP_FOLD is None: SKIP_FOLD = 0
+
 tr_per  = 1.0 - val_per
 batch_size = 2
 epochs = 500
@@ -132,8 +141,10 @@ print('Seed:', SEED             )
 ##############################
 
 # Special treatment of training data in the case of the ISBI2012 dataset
-if DATASET is 'ISBI2012': ISBI2012 = True
-else: ISBI2012 = False
+if DATASET == 'ISBI2012': 
+    ISBI2012 = True
+else: 
+    ISBI2012 = False
 
 ##############################
 
@@ -155,7 +166,7 @@ if MODE == 'TRAINING':
     # Init dataset
     print('Initializing dataset...')
     print(' ')
-    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10, ISBI2012=ISBI2012)   # For training + validation
+    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10, ISBI2012=ISBI2012)   # For training + validation (in case of FOLDS = None, only for training)
 
     # Determine number of samples in training and validation
     samp_tr  = int(np.round(tr_per  * len(train_dataset)))
@@ -174,8 +185,11 @@ if MODE == 'TRAINING':
         all_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', 'all')
         maybe_mkdir_p(all_dir)
 
+        val_dataset = ImageDataset_test(root_dir, ISBI2012=ISBI2012)
+
         # Suffle and load the training set
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1) # num_workers?
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=True)
 
         torch.cuda.empty_cache()
         unet = Unet().to(device)
@@ -189,54 +203,52 @@ if MODE == 'TRAINING':
         print('Starting training'                                      )
         print('                                                       ')
 
-        training_all(unet, train_loader, epochs=epochs, batch_size=batch_size, device=device, all_dir=all_dir)
+        training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=all_dir, dataset=DATASET)
 
     else:
         for fold in range(FOLDS): # Cross validation
-            print('Starting training: fold', fold)
-            # Make directory where we save model and data for each fold
-            fold_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', f'fold{fold}')
-            maybe_mkdir_p(fold_dir)
+            if  fold < SKIP_FOLD:
+                print('Skipping fold', fold)
+                print('                   ')
+            else:
+                print('Starting training: fold', fold)
+                # Make directory where we save model and data for each fold
+                fold_dir = os.path.join(CUR_DIR, 'models', f'{DATASET}', f'fold{fold}')
+                maybe_mkdir_p(fold_dir)
 
-            # Order the training set (first time shuffles, the rest is determined by the shift in order below)
-            train_dataset = [train_dataset[idx] for idx in order]
+                # Order the training set (first time shuffles, the rest is determined by the shift in order below)
+                train_dataset = [train_dataset[idx] for idx in order]
 
-            # Divide full train_dataset between training and validation
-            train_set   = train_dataset[0: samp_tr]
-            val_set     = train_dataset[samp_tr: -1]
+                # Divide full train_dataset between training and validation
+                train_set   = train_dataset[0: samp_tr]
+                val_set     = train_dataset[samp_tr: -1]
 
-            # If testing on CPU use these:
-            # train_set   = train_dataset[0: 2]
-            # val_set     = train_dataset[2: 3]
+                # If testing on CPU use these:
+                # train_set   = train_dataset[0: 2]
+                # val_set     = train_dataset[2: 3]
 
-            train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=1) # num_workers?
-            val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=True)
+                train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True) 
+                val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=True)
 
-            # Shift values in order for next fold of cross validation (a shift of samp_val)
-            order = np.append(order[samp_val:], order[0:samp_val])
-                
-            torch.cuda.empty_cache()
-            unet = Unet().to(device)
-            if START_FROM is not None:  # load latest model
-                # find latest model epoch id
-                epoch_id = max([int(name.replace('unet_weight_save_', '').replace('.pth', '')) for name in os.listdir(os.path.join(fold_dir, 'models'))])
-                print('Starting from Epoch', epoch_id)
-                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(epoch_id))
-                unet.load_state_dict(torch.load(PATH))
+                # Shift values in order for next fold of cross validation (a shift of samp_val)
+                order = np.append(order[samp_val:], order[0:samp_val])
+                    
+                torch.cuda.empty_cache()
+                unet = Unet().to(device)
+                if START_FROM is not None:  # load latest model
+                    # find latest model epoch id
+                    epoch_id = max([int(name.replace('unet_weight_save_', '').replace('.pth', '')) for name in os.listdir(os.path.join(fold_dir, 'models'))])
+                    print('Starting from Epoch', epoch_id)
+                    PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(epoch_id))
+                    unet.load_state_dict(torch.load(PATH))
 
-            print('Number of images used for training  :', len(train_set))
-            print('Number of images used for validation:', len(val_set)  )  
-            print('                                                     ')
-            print('Starting training'                                    )
-            print('                                                     ')
+                print('Number of images used for training  :', len(train_set))
+                print('Number of images used for validation:', len(val_set)  )  
+                print('                                                     ')
+                print('Starting training'                                    )
+                print('                                                     ')
 
-            training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=fold_dir, dataset=DATASET)
-
-            # os.system('python3 aux_training.py -m ' + MODE + ' -d ' + DATASET + ' -f ' + str(FOLDS))
-
-            # if __name__ == "__main__":
-            #     import subprocess, sys
-            #     subprocess.Popen(os.path.join(CUR_DIR, 'aux_training.py'), shell=True)
+                training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=fold_dir, dataset=DATASET)
 
 elif MODE == 'TESTING': 
     # Get model path to test
@@ -251,7 +263,7 @@ elif MODE == 'TESTING':
     test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     # Make directory for test outputs (assumes .pth format)
-    output_dir = os.path.join(model_path[0:len(model_path)-4], '_test')
+    output_dir = model_path[0:len(model_path)-4] + '_test'
     maybe_mkdir_p(output_dir)
 
     torch.cuda.empty_cache()

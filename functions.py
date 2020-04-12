@@ -26,7 +26,7 @@ def weighted_map(gt_batch):
         gt = gt_batch[batch_pos, :, :]
 
         # Hyperparameters given by Ronneberger et al. 2015
-        w0 = 10
+        w0 = 20
         sig2 = 25 # 5^2
 
         # The unique command returns the unique values inside the input tensor, in these case 0 and 1, and these are stored in "uval"
@@ -61,7 +61,9 @@ def weighted_map(gt_batch):
         # closest two objects for each background pixel
         maps = np.sort(maps, 0)
         d1 = maps[0, :, :]
-        d2 = maps[1, :, :]
+        d2 = 0
+        if maps.shape[0] > 1:
+            d2 = maps[1, :, :]
 
         # We now compute the w_d matrix following formula (2) in Ronneberger et al. 2015
         w_d = np.zeros(gt_img.shape)

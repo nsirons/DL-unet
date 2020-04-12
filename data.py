@@ -27,7 +27,7 @@ class ImageDataset(Dataset):
         self.ISBI2012 = ISBI2012
 
         if ISBI2012 is True: 
-            n = len(os.listdir(root_dir)) - 2 // 2
+            n = 1
         else:
             n = len(os.listdir(root_dir)) // 3
 
@@ -62,14 +62,23 @@ class ImageDataset(Dataset):
         return len(self.image)
 
     def __getitem__(self, idx):
-        # Get images
+        # Get images and targets
         image  = np.asarray(self.image[idx])
         target = np.asarray(self.target[idx])
 
+        crop = 388
+
+        # Random crop
+        x = np.random.randint(0, image.shape[-1]-crop)
+        y = np.random.randint(0, image.shape[-1]-crop)
+
+        image  = image[x:x+crop, y:y+crop]
+        target = target[x:x+crop, y:y+crop]
+        
         original_size = image.shape[-1]
 
-        # Generates image such that network's output size is >= label size
-        image  = mirror_transform(image)
+        # Mirror border - Generates image such that network's output size is >= label size
+        image = mirror_transform(image)
         target = mirror_transform(target)
 
         input_size = image.shape[-1]
@@ -130,7 +139,7 @@ class ImageDataset_test(Dataset):
         return len(self.image)
 
     def __getitem__(self, idx):
-        # Get images
+        # Get images and targets
         image = np.asarray(self.image[idx])
         gt    = np.asarray(self.target[idx])
 
