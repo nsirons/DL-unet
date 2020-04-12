@@ -8,6 +8,7 @@ from PIL import Image
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
+from scipy.stats import norm
 
 import torch
 import torchvision
@@ -18,14 +19,19 @@ from functions import input_size_compute
 
 
 class ImageDataset(Dataset):
-    def __init__(self, root_dir, alpha=3, sigma=10, ISBI2012=False):
+    def __init__(self, root_dir, alpha=3, sigma=10, crop=388, ISBI2012=False):
         self.root_dir = root_dir
         self.alpha    = alpha
         self.sigma    = sigma
         self.image    = []
         self.target   = []
         self.ISBI2012 = ISBI2012
-
+        self.target_weighted_crop_distribution = []
+        
+        self.crop = crop
+        self.pairs = None
+        self.skip = 10
+        
         if ISBI2012 is True: 
             n = 1
         else:
@@ -42,7 +48,10 @@ class ImageDataset(Dataset):
 
                 # Remove files from ST (target_dir) present in GT (target_GT_dir) for training
                 for image in os.listdir(target_GT_dir):
-                    os.remove(os.path.join(target_dir, image))
+                    try:
+                        os.remove(os.path.join(target_dir, image))
+                    except:
+                        pass
 
             image_names = [filename.replace('man_seg', 't') for filename in os.listdir(target_dir)]
             self.image.extend(cv.imread(os.path.join(image_dir, image_name),-1) for image_name in image_names)
@@ -52,6 +61,24 @@ class ImageDataset(Dataset):
                 gt, _ = preprocess_gt(img)
                 _, gt_bin = cv.threshold(gt, 0, 255, cv.THRESH_BINARY)
                 self.target.append(gt_bin)
+                
+                if self.pairs is None:
+                    self.pairs = [(ii,jj) for ii in range(0,gt_bin.shape[0] - self.crop,self.skip) for jj in range(0, gt_bin.shape[1] - self.crop,self.skip)]
+                
+                p = []
+                for ii in range(0, gt_bin.shape[0] - self.crop, self.skip):
+                    for jj in range(0,gt_bin.shape[1] - self.crop, self.skip):
+                        x = np.mean(gt_bin[ii:ii + crop,jj:jj+crop]) / 255
+                        if x < 0.1 or x > 0.9:
+                            prob = 0
+                        else:
+                            prob = 10*norm.pdf(x, loc=0.5, scale=0.05)
+                        p.append(prob)
+                if np.sum(p) == 0:
+                    self.target_weighted_crop_distribution.append(np.ones((len(p),) / len(p)))
+                else:
+                    self.target_weighted_crop_distribution.append(p / np.sum(p))
+                        
 
             # Add files from GT back to ST
             if ISBI2012 is False:
@@ -65,18 +92,22 @@ class ImageDataset(Dataset):
         # Get images and targets
         image  = np.asarray(self.image[idx])
         target = np.asarray(self.target[idx])
-
-        crop = 388
-
+        
         # Random crop
-        x = np.random.randint(0, image.shape[-1]-crop)
-        y = np.random.randint(0, image.shape[-1]-crop)
+#         x = np.random.randint(0, image.shape[-1]-crop)
+#         y = np.random.randint(0, image.shape[-1]-crop)
 
-        image  = image[x:x+crop, y:y+crop]
-        target = target[x:x+crop, y:y+crop]
+        crop_id = np.random.choice(range(len(self.pairs)), 1, p=self.target_weighted_crop_distribution[idx])[0]
+        x,y = self.pairs[crop_id]
+        x += np.random.randint(-self.skip/2, (self.skip/2) + 1)
+        y += np.random.randint(-self.skip/2, (self.skip/2) + 1)
+        x = min(max(0, x),target.shape[0] - self.crop)  # not go over image dim
+        y = min(max(0, y),target.shape[1] - self.crop)
+
+        image  = image[x:x+self.crop, y:y+self.crop]
+        target = target[x:x+self.crop, y:y+self.crop]
         
         original_size = image.shape[-1]
-
         # Mirror border - Generates image such that network's output size is >= label size
         image = mirror_transform(image)
         target = mirror_transform(target)
