@@ -146,6 +146,11 @@ if DATASET == 'ISBI2012':
 else: 
     ISBI2012 = False
 
+if DATASET == 'PhC-C2DH-U373':
+    crop = 196
+else:
+    crop = 388
+
 ##############################
 
 if torch.cuda.is_available():
@@ -166,7 +171,7 @@ if MODE == 'TRAINING':
     # Init dataset
     print('Initializing dataset...')
     print(' ')
-    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10, ISBI2012=ISBI2012)   # For training + validation (in case of FOLDS = None, only for training)
+    train_dataset = ImageDataset(root_dir, alpha=200, sigma=10, crop=crop, ISBI2012=ISBI2012)   # For training + validation (in case of FOLDS = None, only for training)
 
     # Determine number of samples in training and validation
     samp_tr  = int(np.round(tr_per  * len(train_dataset)))

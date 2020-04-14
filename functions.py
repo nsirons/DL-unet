@@ -99,7 +99,7 @@ def input_size_compute(image):
     output_size = ((((lowest_res - 4) * 2 - 4) * 2 - 4) * 2 - 4) * 2 - 4
 
     while output_size < original_size:
-        lowest_res += 1
+        lowest_res += 2
 
         input_size  = (((lowest_res * 2 + 4) * 2 + 4) * 2 + 4) * 2 + 4
         output_size = ((((lowest_res - 4) * 2 - 4) * 2 - 4) * 2 - 4) * 2 - 4
@@ -164,6 +164,11 @@ def IoU(pred, label):
     pred_np = pred.cpu().numpy()
     label_np = label.cpu().numpy()
 
-    iou = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+    # dice = np.sum(pred_np[label_np==1]==1)*2.0 / (np.sum(pred_np==1) + np.sum(label_np==1))
+
+    intersection = np.logical_and(pred_np, label_np)
+    union        = np.logical_or(pred_np,  label_np)
+
+    iou = np.sum(intersection) / np.sum(union)
 
     return iou
