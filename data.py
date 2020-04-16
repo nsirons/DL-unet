@@ -75,7 +75,7 @@ class ImageDataset(Dataset):
                             prob = 10*norm.pdf(x, loc=0.5, scale=0.05)
                         p.append(prob)
                 if np.sum(p) == 0:
-                    self.target_weighted_crop_distribution.append(np.ones((len(p),) / len(p)))
+                    self.target_weighted_crop_distribution.append(np.ones((len(p),)) / len(p))
                 else:
                     self.target_weighted_crop_distribution.append(p / np.sum(p))
                         
@@ -173,6 +173,15 @@ class ImageDataset_test(Dataset):
         # Get images and targets
         image = np.asarray(self.image[idx])
         gt    = np.asarray(self.target[idx])
+
+        if image.shape[0] != image.shape[1]: # If images are not square, make them square
+            crop = int(abs(image.shape[0] - image.shape[1]) / 2)
+            if image.shape[0] > image.shape[1]: # H > W, we should pad H (axis 0)
+                image = image[crop:image.shape[1]+crop, :]
+                gt    = gt[crop:image.shape[1]+crop, :]
+            elif image.shape[0] < image.shape[1]: # H < W, we should pad W (axis 1)
+                image = image[:, crop:image.shape[0]+crop]
+                gt    = gt[:, crop:image.shape[0]+crop]
 
         # Apply mirror transform to input image only
         inp = mirror_transform(image)
