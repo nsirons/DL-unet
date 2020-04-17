@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from functions import weighted_map, evaluation_metrics
+from functions import weighted_map, class_balance, evaluation_metrics
 
 from time import time
 
@@ -28,7 +28,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
         when_to_stop = None
 
     optimizer = optim.SGD(unet.parameters(), lr=0.0001, momentum=0.99)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, threshold=1e-2, threshold_mode='rel', eps=1e-7)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=30, threshold=1e-3, threshold_mode='rel', eps=1e-7)
     my_patience = 0
 
     maybe_mkdir_p(os.path.join(fold_dir, 'progress'))
@@ -65,8 +65,14 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             ll[:,1,:,:] = labels[:, 0, :, :] # cell
             ll = ll.to(device)
 
-            weight_maps = weighted_map(labels).to(device)
-            criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+            if dataset is 'DIC-C2DH-HeLa':
+                weight_maps = weighted_map(labels.squeeze(1)).to(device)
+                criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+            else:
+                weight_maps = class_balance(labels.squeeze(1)).to(device)
+                criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+                print(torch.unique(weight_maps))
+
             loss = criterion(preds, ll)
 
             loss.backward() # compute the gradients using backprop
@@ -102,8 +108,13 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
                 ll[:,1,:,:] = labels[:, 0, :, :] # cell
                 ll = ll.to(device)
 
-                weight_maps = weighted_map(labels).to(device)
-                criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+                if dataset is 'DIC-C2DH-HeLa':
+                    weight_maps = weighted_map(labels.squeeze(1)).to(device)
+                    criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+                else:
+                    weight_maps = class_balance(labels.squeeze(1)).to(device)
+                    criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
+
                 loss = criterion(preds, ll)
 
                 total_loss_val += loss
@@ -203,7 +214,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
                 when_to_stop = None
             continue
 
-        # Save model every 50 epochs
+        # Save model every 50 epochskl
         if epoch % 25 == 0:
             PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_latest.pth')
             torch.save(unet.state_dict(), PATH)
@@ -215,7 +226,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             print('Stopping training')
             break
 
-        if my_patience == scheduler.patience: my_patience = 0
+        if my_patience == scheduler.patience: my_patience = -1
 
     print('Training is finished as epoch {} has been reached'.format(epoch))
     print('                                                               ')

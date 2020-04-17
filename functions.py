@@ -34,7 +34,7 @@ def weighted_map(gt_batch):
         [uval, counts] = torch.unique(gt, return_counts=True)
 
         # For the coputation of the w_c tensor:
-        w_c = torch.empty(gt.shape)
+        w_c = torch.empty_like(gt)
         for pos in range(len(uval)):
             # We normalize all pixel values according to the class frequencies. We also constrain that the cell class is set to 1
             w_c[gt == uval[pos]] = counts[1].float() / counts[pos].float() 
@@ -74,6 +74,43 @@ def weighted_map(gt_batch):
 
         # Convert to PyTorch tensor
         w_batch[batch_pos, :, :] = w.clone().detach()
+
+    return w_batch
+
+
+
+def class_balance(gt_batch):
+
+    """ This method is needed to compute the weight map for each ground truth (gt) segmentation, to compensate the different frequency of pixels for each class. 
+
+        Input:
+            - gt: ground truth, generated segmentation mask (0,1). Torch tensor os shape [batch_size, H, W]
+
+        Output: 
+            - w: weight map. Torch tensor (same shape as gt)
+
+    """
+
+    w_batch = torch.empty_like(gt_batch)
+
+    batch_size = gt_batch.shape[0]
+
+    for batch_pos in range(batch_size):
+
+        gt = gt_batch[batch_pos, :, :]
+
+        # The unique command returns the unique values inside the input tensor, in these case 0 and 1, and these are stored in "uval"
+        # "counts" includes the number of times we find each value in "uval" inside of the input tensor
+        [uval, counts] = torch.unique(gt, return_counts=True)
+
+        # For the coputation of the w_c tensor:
+        w_c = torch.empty_like(gt)
+        for pos in range(len(uval)):
+            # We normalize all pixel values according to the class frequencies. We also constrain that the cell class is set to 1
+            w_c[gt == uval[pos]] = counts[1].float() / counts[pos].float() 
+
+        # Convert to PyTorch tensor
+        w_batch[batch_pos, :, :] = w_c.clone().detach()
 
     return w_batch
 
