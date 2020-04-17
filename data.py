@@ -6,7 +6,7 @@ import shutil
 
 from PIL import Image
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, rotate
 from scipy.ndimage.interpolation import map_coordinates
 from scipy.stats import norm
 
@@ -93,10 +93,6 @@ class ImageDataset(Dataset):
         image  = np.asarray(self.image[idx])
         target = np.asarray(self.target[idx])
         
-        # Random crop
-#         x = np.random.randint(0, image.shape[-1]-crop)
-#         y = np.random.randint(0, image.shape[-1]-crop)
-
         crop_id = np.random.choice(range(len(self.pairs)), 1, p=self.target_weighted_crop_distribution[idx])[0]
         x,y = self.pairs[crop_id]
         x += np.random.randint(-self.skip/2, (self.skip/2) + 1)
@@ -109,23 +105,22 @@ class ImageDataset(Dataset):
         
         original_size = image.shape[-1]
         # Mirror border - Generates image such that network's output size is >= label size
-        image = mirror_transform(image)
-        target = mirror_transform(target)
-
-        input_size = image.shape[-1]
+        _, input_size, _ = input_size_compute(image)
+        image_pad = np.pad(image, pad_width=input_size, mode='reflect')
+        target_pad = np.pad(target, pad_width=input_size, mode='reflect')
 
         # Random rotation
-        rot_id = np.random.randint(4)  # if 0 then original img
-        if rot_id == 1:
-            image = np.rot90(image)
-            target = np.rot90(target)
-        elif rot_id == 2:
-            image = np.rot90(image, axes=(1,0))
-            target = np.rot90(target, axes=(1,0))
-        elif rot_id == 3:
-            image = np.rot90(image, k=2)
-            target = np.rot90(target, k=2)
-
+        rot_deg = np.random.choice(np.arange(0,360,30))
+        image_rot = rotate(image_pad, rot_deg)
+        target_rot = rotate(target_pad, rot_deg)
+        h,w = image_rot.shape
+        l = w//2 - input_size//2
+        r = w//2 + input_size//2
+        t = h//2 - input_size//2
+        b = h//2 + input_size//2
+        image = image_rot[t:b, l:r]
+        target = target_rot[t:b, l:r]
+        
         # Perform same elastic transformation 
         inp, gt = elastic_transform((image, target), alpha=self.alpha, sigma=self.sigma)
 
