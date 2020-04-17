@@ -17,7 +17,7 @@ def weighted_map(gt_batch):
 
     """
 
-    w_batch = torch.empty_like(gt_batch)
+    w_batch = torch.empty_like(gt_batch).float()
 
     batch_size = gt_batch.shape[0]
 
@@ -91,7 +91,7 @@ def class_balance(gt_batch):
 
     """
 
-    w_batch = torch.empty_like(gt_batch)
+    w_batch = torch.empty_like(gt_batch).float()
 
     batch_size = gt_batch.shape[0]
 
@@ -104,10 +104,12 @@ def class_balance(gt_batch):
         [uval, counts] = torch.unique(gt, return_counts=True)
 
         # For the coputation of the w_c tensor:
-        w_c = torch.empty_like(gt)
+        w_c = torch.ones(gt.shape) * 1.0
         for pos in range(len(uval)):
             # We normalize all pixel values according to the class frequencies. We also constrain that the cell class is set to 1
-            w_c[gt == uval[pos]] = counts[1].float() / counts[pos].float() 
+            w_c[gt == uval[pos]] = counts[1].float() / counts[pos].float()
+
+        # w_c[gt == 0] = counts[1].float() / counts[0].float()
 
         # Convert to PyTorch tensor
         w_batch[batch_pos, :, :] = w_c.clone().detach()

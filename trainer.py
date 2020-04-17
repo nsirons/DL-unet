@@ -28,7 +28,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
         when_to_stop = None
 
     optimizer = optim.SGD(unet.parameters(), lr=0.0001, momentum=0.99)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=30, threshold=1e-3, threshold_mode='rel', eps=1e-7)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, threshold=1e-2, threshold_mode='rel', eps=1e-7)
     my_patience = 0
 
     maybe_mkdir_p(os.path.join(fold_dir, 'progress'))
@@ -71,7 +71,6 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             else:
                 weight_maps = class_balance(labels.squeeze(1)).to(device)
                 criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
-                print(torch.unique(weight_maps))
 
             loss = criterion(preds, ll)
 
