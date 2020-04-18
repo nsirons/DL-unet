@@ -31,7 +31,7 @@ def weighted_map(gt_batch):
 
         # The unique command returns the unique values inside the input tensor, in these case 0 and 1, and these are stored in "uval"
         # "counts" includes the number of times we find each value in "uval" inside of the input tensor
-        [uval, counts] = torch.unique(gt, return_counts=True)
+        [uval, counts] = torch.unique(gt.float(), return_counts=True)
 
         # For the coputation of the w_c tensor:
         w_c = torch.empty_like(gt)
@@ -185,7 +185,7 @@ def Pixel_error(pred, label):
     pred_np  = pred.cpu().numpy()
     label_np = label.cpu().numpy()
 
-    pixel_error = np.linalg.norm(pred_np - label_np) / pred_np.size
+    pixel_error = np.sum(abs(pred_np - label_np)) / pred_np.size
 
     return pixel_error
 
