@@ -20,7 +20,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
         goal = 0.7756 # IoU value from table 2 in Ronneberger et al. (2015)
     elif DATASET is 'ISBI2012':
         when_to_stop = 1
-        goal = 0.0582 # PE value from table 1 in Ronneberger et al. (2015)
+        goal = 0.0611 # PE value from table 1 in Ronneberger et al. (2015)
     elif DATASET is 'PhC-C2DH-U373':
         when_to_stop = 2
         goal = 0.9203 # IoU value from table 2 in Ronneberger et al. (2015)
