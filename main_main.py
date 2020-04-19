@@ -20,7 +20,7 @@ Notes in Bioinformatics), 9351, 234–241. https://doi.org/10.1007/978-3-319-245
 To run the code, you should be in the same dir as the script and run the following 
 line in the terminal command line:
 
->> python3 main_main.py -m MODE -d DATASET -f FOLDS -n NETWORK
+python3 main_main.py -m MODE -d DATASET -f FOLDS -n NETWORK -s SEED -sf START_FROM -sk SKIP_FOLD
 
 Arguments:
     - MODE: either 'TRAINING' or 'TESTING'. Required.
