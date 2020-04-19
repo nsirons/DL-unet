@@ -436,9 +436,9 @@ def download_all_models():
         os.mkdir(os.path.join(cur_dir, "models"))
     
     models = (
-        ('ISBI2012','1aQEG7YgXlCaKeNa5TAU3XywVd67gFG4Z'),
-        ('DIC-C2DH-HeLa','1Yn9LzM4OgwUZs_fRCCEdhvK4Oh1LhXFT'),
-        ('PhC-C2DH-U373','1NZVW_NkyUbZxH5qzHIj14IqItApv96p1'),
+        ('ISBI2012','1tivQbiNkaQLlEN5ck5JYHyH1hczH_Kgq'),
+        ('DIC-C2DH-HeLa','1Fn5_wSYEFX50orh_qYWDc2BkWjCByRmC'),
+        ('PhC-C2DH-U373','1SWuBGSgQJvR2yBZpR4CSEoOQj2_pGfVI'),
     )
     for name, file_id in models:
         if name not in os.listdir(os.path.join(cur_dir, 'models')):
