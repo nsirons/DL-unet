@@ -48,7 +48,7 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 
-from data import download_all_data, ImageDataset, ImageDataset_test
+from data import download_all_data, ImageDataset, ImageDataset_test, download_all_models
 from network import Unet
 from trainer import training
 from tester import testing
@@ -113,6 +113,7 @@ root_dir = os.path.join(CUR_DIR, 'data', f'{DATASET}-training')
 
 # Download data (if it has not been downoalded already)
 download_all_data()
+download_all_models()
 
 ##############################
 

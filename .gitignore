@@ -204,4 +204,5 @@ dmypy.json
 # Ignore all local history of files
 .history
 
+.ipynb_checkpoints
 # End of https://www.gitignore.io/api/python,pycharm+all,visualstudiocode
