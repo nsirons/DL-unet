@@ -3,6 +3,8 @@ import wget
 import zipfile
 import cv2 as cv
 import shutil
+import requests
+
 
 from PIL import Image
 import numpy as np
@@ -379,7 +381,6 @@ def download_isbi(cur_dir, dataset_type):
                         break
     
     
-
 def download_all_data():
     cur_dir = os.path.abspath('')
     if "data" not in os.listdir(cur_dir):
@@ -394,5 +395,62 @@ def download_all_data():
     download_isbi(cur_dir, "challenge")
 
 
+def download_file_from_google_drive(id, destination):
+    """
+    source: https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url
+    """
+    URL = "https://docs.google.com/uc?export=download"
+
+    session = requests.Session()
+
+    response = session.get(URL, params = { 'id' : id }, stream = True)
+    token = get_confirm_token(response)
+
+    if token:
+        params = { 'id' : id, 'confirm' : token }
+        response = session.get(URL, params = params, stream = True)
+
+    save_response_content(response, destination)    
+
+
+def get_confirm_token(response):
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            return value
+
+    return None
+
+
+def save_response_content(response, destination):
+    CHUNK_SIZE = 32768
+
+    with open(destination, "wb") as f:
+        for chunk in response.iter_content(CHUNK_SIZE):
+            if chunk: # filter out keep-alive new chunks
+                f.write(chunk)
+
+
+def download_all_models():
+    cur_dir = os.path.abspath('')
+    if "models" not in os.listdir(cur_dir):
+        os.mkdir(os.path.join(cur_dir, "models"))
+    
+    models = (
+        ('ISBI2012','1aQEG7YgXlCaKeNa5TAU3XywVd67gFG4Z'),
+        ('DIC-C2DH-HeLa','1Yn9LzM4OgwUZs_fRCCEdhvK4Oh1LhXFT'),
+        ('PhC-C2DH-U373','1NZVW_NkyUbZxH5qzHIj14IqItApv96p1'),
+    )
+    for name, file_id in models:
+        if name not in os.listdir(os.path.join(cur_dir, 'models')):
+            print(f"Downloading model - {name}")
+            destination = os.path.join(cur_dir, 'models', name + '.zip')
+            download_file_from_google_drive(file_id, destination)
+            print(f"Extracting mode - {name}")
+            with zipfile.ZipFile(destination, 'r') as zip_ref:
+                zip_ref.extractall(os.path.join(cur_dir, "models"))
+            os.remove(destination)
+            print(f"Done - {name}")
+
 if __name__ == "__main__":
     download_all_data()
+    download_all_models()
