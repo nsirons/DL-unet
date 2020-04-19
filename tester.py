@@ -41,11 +41,12 @@ def testing(unet, test_loader, batch_size, device, output_dir):
         else:
             np.concatenate((test_eval, evaluation_metrics(pred[0, :, :].detach(), label[0, 0, :, :].detach())), axis=1)
 
-    test = np.mean(test_eval, axis=1)
-    # std
+    test     = np.mean(test_eval, axis=1)
+    test_std = np.std(test_eval,  axis=1)
 
-    test_iou = [test[0]]
-    test_pe  = [test[1]]
+    test_iou = [test[0], test_std[0]]
+    test_pe  = [test[1], test_std[1]]
+
     np.savetxt(os.path.join(output_dir, 'test_iou.out'), test_iou)
     np.savetxt(os.path.join(output_dir, 'test_pe.out' ), test_pe )
 

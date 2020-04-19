@@ -12,23 +12,23 @@ from functions import weighted_map, class_balance, evaluation_metrics
 
 from time import time
 
-def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_dir, dataset):
+def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_dir, DATASET):
 
     # Set goals for training to end
-    if dataset is 'DIC-C2DH-HeLa':
+    if DATASET is 'DIC-C2DH-HeLa':
         when_to_stop = 0
         goal = 0.7756 # IoU value from table 2 in Ronneberger et al. (2015)
-    elif dataset is 'ISBI2012':
+    elif DATASET is 'ISBI2012':
         when_to_stop = 1
         goal = 0.0582 # PE value from table 1 in Ronneberger et al. (2015)
-    elif dataset is 'PhC-C2DH-U373':
+    elif DATASET is 'PhC-C2DH-U373':
         when_to_stop = 2
         goal = 0.9203 # IoU value from table 2 in Ronneberger et al. (2015)
     else:
         when_to_stop = None
 
     optimizer = optim.SGD(unet.parameters(), lr=0.0001, momentum=0.99)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, threshold=1e-2, threshold_mode='rel', eps=1e-7)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=30, threshold=1e-3, threshold_mode='rel', eps=1e-7)
     my_patience = 0
 
     maybe_mkdir_p(os.path.join(fold_dir, 'progress'))
@@ -65,7 +65,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             ll[:,1,:,:] = labels[:, 0, :, :] # cell
             ll = ll.to(device)
 
-            if dataset is 'DIC-C2DH-HeLa':
+            if DATASET is 'DIC-C2DH-HeLa':
                 weight_maps = weighted_map(labels.squeeze(1)).to(device)
                 criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
             else:
@@ -107,7 +107,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
                 ll[:,1,:,:] = labels[:, 0, :, :] # cell
                 ll = ll.to(device)
 
-                if dataset is 'DIC-C2DH-HeLa':
+                if DATASET is 'DIC-C2DH-HeLa':
                     weight_maps = weighted_map(labels.squeeze(1)).to(device)
                     criterion = nn.BCEWithLogitsLoss(weight=weight_maps)
                 else:
@@ -184,7 +184,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
 
         if when_to_stop == 0:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(DATASET))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
@@ -194,7 +194,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             continue
         elif when_to_stop == 1:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(DATASET))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
@@ -204,7 +204,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
             continue
         elif when_to_stop == 2:
             if val_eval_epoch[0] > goal:
-                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(dataset))
+                PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_{}.pth'.format(DATASET))
                 torch.save(unet.state_dict(), PATH)
                 print('The goal was reached in epoch {}!'.format(epoch))
                 print('Model has been saved:')
@@ -213,7 +213,7 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
                 when_to_stop = None
             continue
 
-        # Save model every 50 epochskl
+        # Save model every 50 epochs
         if epoch % 25 == 0:
             PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_latest.pth')
             torch.save(unet.state_dict(), PATH)
@@ -223,6 +223,11 @@ def training(unet, train_loader, val_loader, epochs, batch_size, device, fold_di
         if l_rate < 10 * scheduler.eps and my_patience == scheduler.patience:
             print(f'LR dropped below {10 * scheduler.eps}!')
             print('Stopping training')
+            print(' ')
+            PATH = os.path.join(fold_dir, 'models', 'unet_weight_save_latest.pth')
+            torch.save(unet.state_dict(), PATH)
+            print('Model has been saved:')
+            print(PATH)
             break
 
         if my_patience == scheduler.patience: my_patience = -1
