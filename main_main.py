@@ -209,7 +209,7 @@ if MODE == 'TRAINING':
         print('Starting training'                                      )
         print('                                                       ')
 
-        training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=all_dir, dataset=DATASET)
+        training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=all_dir, DATASET=DATASET)
 
     else:
         for fold in range(FOLDS): # Cross validation
@@ -254,7 +254,7 @@ if MODE == 'TRAINING':
                 print('Starting training'                                    )
                 print('                                                     ')
 
-                training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=fold_dir, dataset=DATASET)
+                training(unet, train_loader, val_loader, epochs=epochs, batch_size=batch_size, device=device, fold_dir=fold_dir, DATASET=DATASET)
 
 elif MODE == 'TESTING': 
     # Get model path to test
